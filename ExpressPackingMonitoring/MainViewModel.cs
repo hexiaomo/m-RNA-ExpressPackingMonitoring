@@ -62,6 +62,13 @@ namespace ExpressPackingMonitoring.ViewModels
         private Task _videoTask;
         private object _videoLock = new object();
 
+        // 摄像头重连控制
+        private volatile bool _isRestartingCamera = false;
+        private DateTime _lastRestartAttempt = DateTime.MinValue;
+        private int _consecutiveRestartFailures = 0;
+        private const int MaxConsecutiveRestartFailures = 5;
+        private const double MinRestartIntervalSeconds = 10.0;
+
         private readonly SemaphoreSlim _recorderLock = new SemaphoreSlim(1, 1);
         private bool _isInputOnCooldown = false;
         private Process _currentFfmpegProcess;
@@ -397,10 +404,9 @@ namespace ExpressPackingMonitoring.ViewModels
 
             try 
             {
-                PauseSpeechForRecording();
-
                 if (IsRecording) 
                 {
+                    PauseSpeechForRecording();
                     await InternalStopRecordingAsync();
                     CurrentOrderId = "";
                     ScanInputText = "";
@@ -443,6 +449,10 @@ namespace ExpressPackingMonitoring.ViewModels
                     {
                         SpeakWarning("没有单号", 3, cancelPrevious: false);
                     }
+
+                    // 语音播报完成后再暂停，避免"开始录制"被延迟
+                    if (IsRecording)
+                        PauseSpeechForRecording();
                 }
             }
             catch (Exception ex)
@@ -487,11 +497,13 @@ namespace ExpressPackingMonitoring.ViewModels
             if (!await _recorderLock.WaitAsync(0)) return;
             try
             {
-                PauseSpeechForRecording();
-
                 // 扫码切换：立即打断上一轮可能还在播放的语音（如"重复单号"×3）
                 _speechService?.Stop();
-                if (IsRecording) await InternalStopRecordingAsync();
+                if (IsRecording)
+                {
+                    PauseSpeechForRecording();
+                    await InternalStopRecordingAsync();
+                }
                 await InternalStartRecordingAsync();
 
                 // 录制已启动、数据库记录已写入，此时检查重复单号（排除刚刚插入的当前记录）
@@ -538,6 +550,10 @@ namespace ExpressPackingMonitoring.ViewModels
                     LastZoomRect = System.Windows.Rect.Empty;
                     IsZoomingActive = true;
                 }
+
+                // 语音播报完成后再暂停，避免"开始录制"和订单信息被延迟
+                if (IsRecording)
+                    PauseSpeechForRecording();
             }
             catch (Exception ex)
             {
@@ -689,6 +705,7 @@ namespace ExpressPackingMonitoring.ViewModels
                         else
                         {
                             ShowToast("⚙️ 配置已保存，重启相机");
+                            _consecutiveRestartFailures = 0;
                             RestartCamera();
                         }
                     }
@@ -901,7 +918,66 @@ namespace ExpressPackingMonitoring.ViewModels
             }
         }
 
-        private void RestartCamera() { _ = SafeStopRecordingAsync(); StopCamera(); StartCamera(); }
+        private void RestartCamera()
+        {
+            // 阻止并发重启
+            if (_isRestartingCamera) return;
+            _isRestartingCamera = true;
+            try
+            {
+                StopCamera();
+                StartCamera();
+                _lastRestartAttempt = DateTime.Now;
+            }
+            finally
+            {
+                _isRestartingCamera = false;
+            }
+        }
+
+        private async void RestartCameraWithRecordingStop()
+        {
+            if (_isRestartingCamera) return;
+            _isRestartingCamera = true;
+            try
+            {
+                if (IsRecording)
+                {
+                    _stopReason = "摄像头断连";
+                    await SafeStopRecordingAsync();
+                }
+                StopCamera();
+                StartCamera();
+                _lastRestartAttempt = DateTime.Now;
+
+                // 检查重启是否成功
+                if (_videoSource != null && _videoSource.IsRunning)
+                {
+                    _consecutiveRestartFailures = 0;
+                }
+                else
+                {
+                    _consecutiveRestartFailures++;
+                    if (_consecutiveRestartFailures >= MaxConsecutiveRestartFailures)
+                    {
+                        ShowToast($"⚠ 摄像头连续 {MaxConsecutiveRestartFailures} 次重连失败，已停止自动重连。请重新插拔后在设置中手动重启。");
+                        SpeakWarning("请重新连接摄像头", 3);
+                        Debug.WriteLine($"[Camera] 连续 {_consecutiveRestartFailures} 次重连失败，停止自动重连");
+                    }
+                }
+            }
+            finally
+            {
+                _isRestartingCamera = false;
+            }
+        }
+
+        /// <summary>用户手动触发摄像头重置（在设置或 UI 按钮调用）</summary>
+        public void ManualRestartCamera()
+        {
+            _consecutiveRestartFailures = 0;
+            RestartCamera();
+        }
 
         /// <summary>
         /// 注册用户活跃信号（扫码/鼠标/键盘/按钮等），如果摄像头休眠中则唤醒
@@ -911,11 +987,19 @@ namespace ExpressPackingMonitoring.ViewModels
             _lastActivityTime = DateTime.Now;
             if (_isCameraSleeping)
             {
-                IsCameraSleeping = false; // SetProperty 会同时更新字段并触发 PropertyChanged
+                IsCameraSleeping = false;
+                _consecutiveRestartFailures = 0;
                 StartCamera();
                 ShowToast("摄像头已唤醒");
                 Speak("摄像头已唤醒");
                 Debug.WriteLine("[Idle] 用户活跃，摄像头唤醒");
+            }
+            else if (_consecutiveRestartFailures >= MaxConsecutiveRestartFailures)
+            {
+                // 用户活动时如果摄像头已停止自动重连，重置并再试一次
+                _consecutiveRestartFailures = 0;
+                Debug.WriteLine("[Camera] 用户活动，重置重连计数器并重试");
+                RestartCamera();
             }
         }
 
@@ -1279,6 +1363,18 @@ namespace ExpressPackingMonitoring.ViewModels
                             cameraErrorCounter = 0;
                             cameraMissingCounter = 0;
                         }
+                        // 如果已达重连上限或正在重启中，不再尝试
+                        else if (_isRestartingCamera || _consecutiveRestartFailures >= MaxConsecutiveRestartFailures)
+                        {
+                            cameraErrorCounter = 0;
+                            cameraMissingCounter = 0;
+                        }
+                        // 冷却期间不尝试重连（退避机制）
+                        else if ((DateTime.Now - _lastRestartAttempt).TotalSeconds < MinRestartIntervalSeconds * Math.Max(1, _consecutiveRestartFailures))
+                        {
+                            cameraErrorCounter = 0;
+                            cameraMissingCounter = 0;
+                        }
                         // 摄像头掉线检测：如果 3秒没帧，且 _videoSource 理论上在运行
                         else if (_videoSource != null && _videoSource.IsRunning)
                         {
@@ -1287,10 +1383,11 @@ namespace ExpressPackingMonitoring.ViewModels
                             if (cameraErrorCounter > (_actualCameraFps * 3))
                             {
                                 cameraErrorCounter = 0;
+                                Debug.WriteLine($"[Camera] 信号丢失，尝试重连 (失败次数={_consecutiveRestartFailures})");
                                 _ = Application.Current.Dispatcher.InvokeAsync(() => {
                                     ShowToast("⚠ 摄像头信号丢失，尝试重连...");
-                                    SpeakWarning("摄像头重连中");
-                                    RestartCamera();
+                                    SpeakWarning("摄像头重新连接中");
+                                    RestartCameraWithRecordingStop();
                                 });
                             }
                         }
@@ -1304,14 +1401,20 @@ namespace ExpressPackingMonitoring.ViewModels
                                 var videoDevices = new FilterInfoCollection(FilterCategory.VideoInputDevice);
                                 if (videoDevices.Count > 0)
                                 {
+                                    Debug.WriteLine($"[Camera] 检测到设备，尝试启动 (失败次数={_consecutiveRestartFailures})");
                                     _ = Application.Current.Dispatcher.InvokeAsync(() => {
                                         ShowToast("📷 检测到摄像头，尝试启动...");
                                         Speak("摄像头重启中");
-                                        RestartCamera();
+                                        RestartCameraWithRecordingStop();
                                     });
                                 }
                             }
                         }
+
+                        // 无帧时降低循环频率，避免空转 CPU
+                        await Task.Delay(200, token);
+                        frameTickCounter++;
+                        continue;
                     }
 
                     if (IsRecording)

@@ -158,6 +158,7 @@ namespace ExpressPackingMonitoring.ViewModels
             if (_pendingCameraRestart && !_isDisposed)
             {
                 _pendingCameraRestart = false;
+                _consecutiveRestartFailures = 0;
                 RestartCamera();
                 ShowToast("摄像头配置已生效");
             }
