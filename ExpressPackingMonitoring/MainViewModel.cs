@@ -68,7 +68,7 @@ namespace ExpressPackingMonitoring.ViewModels
         private DateTime _lastRestartAttempt = DateTime.MinValue;
         private int _consecutiveRestartFailures = 0;
         private const int MaxConsecutiveRestartFailures = 5;
-        private const double MinRestartIntervalSeconds = 10.0;
+        private const double MinRestartIntervalSeconds = 3.0;
 
         private readonly SemaphoreSlim _recorderLock = new SemaphoreSlim(1, 1);
         private bool _isInputOnCooldown = false;
@@ -1213,7 +1213,7 @@ namespace ExpressPackingMonitoring.ViewModels
                     if (currentFrame != null && _cameraEverConnected && !_isCameraSleeping)
                     {
                         double sinceLastNewFrame = (DateTime.Now - _lastFrameTime).TotalSeconds;
-                        if (sinceLastNewFrame > 3.0)
+                        if (sinceLastNewFrame > 1.5)
                         {
                             currentFrame.Dispose();
                             currentFrame = null;
@@ -1422,7 +1422,7 @@ namespace ExpressPackingMonitoring.ViewModels
                         else if (_videoSource != null && _videoSource.IsRunning)
                         {
                             double noFrameSeconds = (DateTime.Now - _lastFrameTime).TotalSeconds;
-                            if (noFrameSeconds > 3.0)
+                            if (noFrameSeconds > 1.5)
                             {
                                 Debug.WriteLine($"[Camera] 信号丢失 {noFrameSeconds:F1}s，尝试重连 (失败次数={_consecutiveRestartFailures})");
                                 _ = Application.Current.Dispatcher.InvokeAsync(() => {
@@ -1436,7 +1436,7 @@ namespace ExpressPackingMonitoring.ViewModels
                         {
                             // 摄像头曾连接过但现在不可用（断连/拔掉）：持续尝试重连
                             double missingSeconds = (DateTime.Now - _lastFrameTime).TotalSeconds;
-                            if (missingSeconds > 5.0)
+                            if (missingSeconds > 2.0)
                             {
                                 Debug.WriteLine($"[Camera] 摄像头断开，尝试重连 (失败次数={_consecutiveRestartFailures})");
                                 _ = Application.Current.Dispatcher.InvokeAsync(() => {
