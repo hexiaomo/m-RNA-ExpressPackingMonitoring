@@ -36,7 +36,6 @@ namespace ExpressPackingMonitoring.Services
         private Timer? _idleUnloadTimer;
         private BlockingCollection<(string text, bool isWarning)>? _preGenQueue;
         private Thread? _preGenThread;
-        private readonly ConcurrentQueue<SpeechRequest> _deferredSpeechQueue = new();
         private readonly ManualResetEventSlim _speechProcessingGate = new(initialState: true);
         private readonly object _speechStateLock = new();
         private volatile bool _pauseForRecordingRequested;
@@ -74,11 +73,10 @@ namespace ExpressPackingMonitoring.Services
             {
                 if (_pauseForRecordingRequested) return;
                 _pauseForRecordingRequested = true;
-                _speechCancelRequested = true;
-                _speechProcessingGate.Reset();
+                _speechProcessingGate.Reset(); // 只阻塞 AI 预生成线程
             }
 
-            Debug.WriteLine("[SpeechService] 录制中，语音生成/播放已暂停并转入排队");
+            Debug.WriteLine("[SpeechService] 录制中，AI 语音生成已暂停，播放照常");
         }
 
         public void ResumeAfterRecording()
@@ -89,12 +87,10 @@ namespace ExpressPackingMonitoring.Services
             {
                 if (!_pauseForRecordingRequested) return;
                 _pauseForRecordingRequested = false;
-                _speechCancelRequested = false;
-                _speechProcessingGate.Set();
-                FlushDeferredSpeechQueueUnsafe();
+                _speechProcessingGate.Set(); // 恢复 AI 预生成线程
             }
 
-            Debug.WriteLine("[SpeechService] 录制结束，继续处理排队语音");
+            Debug.WriteLine("[SpeechService] 录制结束，AI 语音生成已恢复");
         }
 
         private void WaitWhilePaused()
@@ -109,34 +105,12 @@ namespace ExpressPackingMonitoring.Services
         {
             if (_isDisposed) return;
 
-            if (_pauseForRecordingRequested)
-            {
-                _deferredSpeechQueue.Enqueue(request);
-                return;
-            }
-
             var queue = _speechQueue;
             if (queue == null || queue.IsAddingCompleted) return;
 
             try { queue.Add(request); } catch { }
         }
 
-        private void RequeueSpeechRequest(SpeechRequest request)
-        {
-            if (_isDisposed) return;
-            _deferredSpeechQueue.Enqueue(request);
-        }
-
-        private void FlushDeferredSpeechQueueUnsafe()
-        {
-            var queue = _speechQueue;
-            if (queue == null || queue.IsAddingCompleted) return;
-
-            while (_deferredSpeechQueue.TryDequeue(out var pending))
-            {
-                try { queue.Add(pending); } catch { break; }
-            }
-        }
 
         private void InitSpeechSynthesizer()
         {
@@ -245,12 +219,7 @@ namespace ExpressPackingMonitoring.Services
                 foreach (var req in _speechQueue.GetConsumingEnumerable())
                 {
                     if (_isDisposed) break;
-
-                    WaitWhilePaused();
-                    if (_isDisposed) break;
-
                     _speechCancelRequested = false;
-                    bool shouldRetryAfterPause = false;
 
                     try
                     {
@@ -258,18 +227,18 @@ namespace ExpressPackingMonitoring.Services
                             ? string.Join("，", Enumerable.Repeat(req.Text, req.RepeatCount))
                             : req.Text;
 
-                        shouldRetryAfterPause = EnableAiTts
-                            ? !SpeakWithKokoro(fullText, req.IsWarning)
-                            : !SpeakWithWindowsTts(fullText, req.IsWarning);
+                        if (EnableAiTts)
+                        {
+                            SpeakWithKokoro(fullText, req.IsWarning);
+                        }
+                        else
+                        {
+                            SpeakWithWindowsTts(fullText, req.IsWarning);
+                        }
                     }
                     catch (Exception ex)
                     {
                         Debug.WriteLine($"[SpeechService] Playback error: {ex.Message}");
-                    }
-
-                    if (shouldRetryAfterPause && _pauseForRecordingRequested && !_isDisposed)
-                    {
-                        RequeueSpeechRequest(req);
                     }
                 }
             }
@@ -279,8 +248,6 @@ namespace ExpressPackingMonitoring.Services
 
         private bool SpeakWithWindowsTts(string text, bool isWarning)
         {
-            if (_pauseForRecordingRequested || _isDisposed) return false;
-
             var synth = isWarning ? _ttsWarning : _ttsNormal;
             if (synth == null) return true;
 
@@ -290,15 +257,14 @@ namespace ExpressPackingMonitoring.Services
             var wavData = ms.ToArray();
 
             if (wavData.Length < 44) return true;
-            if (_speechCancelRequested || _isDisposed) return !_pauseForRecordingRequested;
+            if (_speechCancelRequested || _isDisposed) return true;
 
-            return PlayWavBlocking(wavData);
+            PlayWavBlocking(wavData);
+            return true;
         }
 
         private bool SpeakWithKokoro(string text, bool isWarning)
         {
-            if (_pauseForRecordingRequested || _isDisposed) return false;
-
             int sid = isWarning ? AiTtsWarningSpeakerId : AiTtsSpeakerId;
 
             // 电商场景文本预处理
@@ -306,26 +272,21 @@ namespace ExpressPackingMonitoring.Services
 
             Debug.WriteLine($"[SpeechService] Kokoro: sid={sid}, speed={AiTtsSpeed}, text=\"{text}\"");
 
-            // 1. 尝试从磁盘缓存读取（命中缓存不需要加载模型）
+            // 1. 尝试从磁盘缓存读取（命中缓存只是读文件+播放，不涉及 AI 生成，录制中也允许）
             string cacheKey = GetCacheKey(text, AiTtsSpeed, sid);
             byte[]? wavData = LoadFromCache(cacheKey);
             if (wavData != null)
             {
                 Debug.WriteLine($"[SpeechService] Cache HIT: {cacheKey}");
-                if (_speechCancelRequested || _isDisposed) return !_pauseForRecordingRequested;
-                return PlayWavBlocking(wavData);
+                if (!_speechCancelRequested && !_isDisposed)
+                    PlayWavBlocking(wavData);
+                return true;
             }
 
-            if (_pauseForRecordingRequested || _isDisposed) return false;
-
-            // 2. 缓存未命中：先用系统语音及时播报，后台预生成AI缓存供下次使用
+            // 2. 缓存未命中：用系统语音及时播报，后台预生成AI缓存供下次使用
             Debug.WriteLine($"[SpeechService] Cache MISS, 先用系统语音播报，后台预生成AI缓存");
-            bool completed = SpeakWithWindowsTts(text, isWarning);
-            if (!completed) return false;
-
-            if (_pauseForRecordingRequested || _isDisposed) return false;
-
-            // 后台排队生成AI缓存，下次就能直接命中（text 已预处理，跳过重复预处理）
+            SpeakWithWindowsTts(text, isWarning);
+            // 后台排队生成AI缓存（如果录制中，PreGenThread 会自动等待）
             PreGenerateCacheInternal(text, isWarning);
             return true;
         }
@@ -702,9 +663,9 @@ namespace ExpressPackingMonitoring.Services
             return wav;
         }
 
-        private bool PlayWavBlocking(byte[] wavData)
+        private void PlayWavBlocking(byte[] wavData)
         {
-            if (wavData.Length < 44) return true;
+            if (wavData.Length < 44) return;
             int fmtSize = BitConverter.ToInt32(wavData, 16);
             int fmtEnd = 20 + fmtSize;
             int dataOffset = fmtEnd;
@@ -721,18 +682,17 @@ namespace ExpressPackingMonitoring.Services
                 }
                 dataOffset += 8 + (chunkSize % 2 == 0 ? chunkSize : chunkSize + 1);
             }
-            if (dataSize <= 0) return true;
+            if (dataSize <= 0) return;
 
             byte[] wfx = new byte[Math.Max(fmtSize, 18)];
             Array.Copy(wavData, 20, wfx, 0, Math.Min(fmtSize, wfx.Length));
 
             IntPtr hwo = IntPtr.Zero;
             GCHandle dataHandle = default;
-            bool completed = true;
             try
             {
                 int mmResult = waveOutOpen(out hwo, (uint)WAVE_MAPPER, wfx, null, IntPtr.Zero, CALLBACK_NULL);
-                if (mmResult != 0) return true;
+                if (mmResult != 0) return;
 
                 dataHandle = GCHandle.Alloc(wavData, GCHandleType.Pinned);
                 var header = new WaveHeader
@@ -751,7 +711,6 @@ namespace ExpressPackingMonitoring.Services
 
                 if (_speechCancelRequested || _isDisposed)
                 {
-                    completed = !_pauseForRecordingRequested;
                     waveOutReset(hwo);
                 }
 
@@ -762,15 +721,12 @@ namespace ExpressPackingMonitoring.Services
                 if (hwo != IntPtr.Zero) waveOutClose(hwo);
                 if (dataHandle.IsAllocated) dataHandle.Free();
             }
-
-            return completed;
         }
 
         public void Stop()
         {
             _speechCancelRequested = true;
             while (_speechQueue != null && _speechQueue.TryTake(out _)) { }
-            while (_deferredSpeechQueue.TryDequeue(out _)) { }
         }
 
         public void Speak(string text, bool cancelPrevious = true)
