@@ -69,6 +69,7 @@ namespace ExpressPackingMonitoring.ViewModels
         private short _audioPeakSinceLastCheck;
         private long _audioBytesSinceLastCheck;
         private int _silentAudioCheckCount;
+        private int _audioMonitorLogTick;
         private int _audioConvertFailureCount;
         private int _audioSelectedSourceChannel = -1;
         private double _audioResamplePosition;

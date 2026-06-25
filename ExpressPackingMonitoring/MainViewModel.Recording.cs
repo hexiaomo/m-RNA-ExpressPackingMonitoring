@@ -749,6 +749,7 @@ namespace ExpressPackingMonitoring.ViewModels
                     _audioPeakSinceLastCheck = 0;
                     _audioBytesSinceLastCheck = 0;
                     _silentAudioCheckCount = 0;
+                    _audioMonitorLogTick = 0;
                     _audioConvertFailureCount = 0;
                     _audioSelectedSourceChannel = -1;
                     _audioResamplePosition = 0;
@@ -1313,6 +1314,7 @@ namespace ExpressPackingMonitoring.ViewModels
                     short peak;
                     long bytes;
                     int silentCount;
+                    bool shouldLogLevel;
                     lock (_audioLock)
                     {
                         shouldMonitor = !_audioStopRequested && _audioWriter != null && _audioCapture != null;
@@ -1329,13 +1331,19 @@ namespace ExpressPackingMonitoring.ViewModels
                         else if (bytes > 0 && peak > 1)
                             _silentAudioCheckCount = 0;
                         silentCount = _silentAudioCheckCount;
+                        _audioMonitorLogTick++;
+                        shouldLogLevel = silentCount > 0 || _audioMonitorLogTick % 5 == 0;
                     }
 
                     if (shouldMonitor && (DateTime.Now - lastDataAt).TotalSeconds > 5)
+                    {
+                        WriteAudioDiagnostic($"音频数据断流: lastDataAge={(DateTime.Now - lastDataAt).TotalSeconds:F1}s");
                         RestartAudioCapture("no-data");
+                    }
                     else if (shouldMonitor && bytes > 0)
                     {
-                        WriteAudioDiagnostic($"音频电平: peak={peak}, bytes={bytes}, silentCount={silentCount}, silentRestart=disabled");
+                        if (shouldLogLevel)
+                            WriteAudioDiagnostic($"音频电平: peak={peak}, bytes={bytes}, silentCount={silentCount}, silentRestart=disabled");
                     }
                 }
                 catch (OperationCanceledException) { break; }
@@ -1403,6 +1411,7 @@ namespace ExpressPackingMonitoring.ViewModels
                     _audioPeakSinceLastCheck = 0;
                     _audioBytesSinceLastCheck = 0;
                     _silentAudioCheckCount = 0;
+                    _audioMonitorLogTick = 0;
                     _audioConvertFailureCount = 0;
                     _audioResamplePosition = 0;
                     _audioPreviousSourceSample = 0;
