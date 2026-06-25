@@ -782,6 +782,7 @@ namespace ExpressPackingMonitoring.ViewModels
             BlockingCollection<byte[]>? writeQueue;
             Task? writeTask;
             bool writeFailed;
+            byte[]? resampleTailBytes;
             string? audioFilePath;
             CancellationTokenSource? monitorCts;
             Task? monitorTask;
@@ -794,6 +795,7 @@ namespace ExpressPackingMonitoring.ViewModels
                 writeQueue = _audioWriteQueue;
                 writeTask = _audioFileWriteTask;
                 writeFailed = _audioWriteFailed;
+                resampleTailBytes = FlushResamplerTail(_audioPreviousSourceSample, _audioHasPreviousSourceSample, ref _audioResamplePosition);
                 audioFilePath = _currentAudioFilePath;
                 monitorCts = _audioMonitorCts;
                 monitorTask = _audioMonitorTask;
@@ -812,6 +814,20 @@ namespace ExpressPackingMonitoring.ViewModels
             try { capture?.Dispose(); } catch { }
             try { monitorTask?.Wait(1000); } catch { }
             try { monitorCts?.Dispose(); } catch { }
+            if (resampleTailBytes != null && resampleTailBytes.Length > 0 && writeQueue != null && !writeQueue.IsAddingCompleted && !writeFailed)
+            {
+                try
+                {
+                    if (writeQueue.TryAdd(resampleTailBytes))
+                        _audioBytesWritten += resampleTailBytes.Length;
+                    else
+                        writeFailed = true;
+                }
+                catch
+                {
+                    writeFailed = true;
+                }
+            }
             try { writeQueue?.CompleteAdding(); } catch { }
 
             bool writeCompleted = true;
@@ -1138,6 +1154,17 @@ namespace ExpressPackingMonitoring.ViewModels
             previousSourceSample = sourceSamples[^1];
             hasPreviousSourceSample = true;
             return Pcm16SamplesToBytes(output);
+        }
+
+        private static byte[]? FlushResamplerTail(short previousSourceSample, bool hasPreviousSourceSample, ref double resamplePosition)
+        {
+            if (!hasPreviousSourceSample || resamplePosition <= 0) return null;
+
+            var output = new List<short>(1);
+            if (resamplePosition < 1)
+                output.Add(previousSourceSample);
+            resamplePosition = 0;
+            return output.Count == 0 ? null : Pcm16SamplesToBytes(output);
         }
 
         private static byte[] Pcm16SamplesToBytes(IReadOnlyList<short> samples)
