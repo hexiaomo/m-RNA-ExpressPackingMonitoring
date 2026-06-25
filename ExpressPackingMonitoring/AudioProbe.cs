@@ -52,9 +52,11 @@ namespace ExpressPackingMonitoring
             string wavPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "audio_probe.wav");
             string mkvPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "audio_probe.mkv");
             string mp4Path = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "audio_probe.mp4");
+            string decodedWavPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "audio_probe_decoded.wav");
             try { if (File.Exists(wavPath)) File.Delete(wavPath); } catch { }
             try { if (File.Exists(mkvPath)) File.Delete(mkvPath); } catch { }
             try { if (File.Exists(mp4Path)) File.Delete(mp4Path); } catch { }
+            try { if (File.Exists(decodedWavPath)) File.Delete(decodedWavPath); } catch { }
 
             var log = new StringBuilder();
             log.AppendLine($"Audio probe started: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
@@ -184,7 +186,7 @@ namespace ExpressPackingMonitoring
 
             var wavInfo = ReadWavInfo(wavPath);
             var wavTimeline = ReadWavTimeline(wavPath);
-            var mp4Info = ProbeMp4Mux(mkvPath, wavPath, mp4Path, seconds, config.AudioSyncOffsetMs);
+            var mp4Info = ProbeMp4Mux(mkvPath, wavPath, mp4Path, decodedWavPath, seconds, config.AudioSyncOffsetMs);
             bool ok = stoppedException == null
                 && videoInfo.Exited
                 && videoInfo.ExitCode == 0
@@ -197,7 +199,9 @@ namespace ExpressPackingMonitoring
                 && wavInfo.DurationSeconds >= seconds * 0.8
                 && wavTimeline.Valid
                 && !LooksLikeShortPulseThenSilence(wavInfo.DurationSeconds, wavTimeline.ActiveWindowCount, wavTimeline.MaxConsecutiveActiveWindows, wavTimeline.LastActiveSecond)
-                && mp4Info.Valid;
+                && mp4Info.Valid
+                && mp4Info.DecodedTimeline.Valid
+                && !LooksLikeShortPulseThenSilence(mp4Info.DecodedDurationSeconds, mp4Info.DecodedTimeline.ActiveWindowCount, mp4Info.DecodedTimeline.MaxConsecutiveActiveWindows, mp4Info.DecodedTimeline.LastActiveSecond);
             log.AppendLine($"Packets={packets}");
             log.AppendLine($"RawBytes={rawBytes}");
             log.AppendLine($"Bytes={bytes}");
@@ -228,6 +232,14 @@ namespace ExpressPackingMonitoring
             log.AppendLine($"Mp4Valid={mp4Info.Valid}");
             log.AppendLine($"Mp4Bytes={mp4Info.FileBytes}");
             log.AppendLine($"Mp4AudioDecodeOk={mp4Info.AudioDecodeOk}");
+            log.AppendLine($"Mp4DecodedWavPath={decodedWavPath}");
+            log.AppendLine($"Mp4DecodedWavBytes={mp4Info.DecodedFileBytes}");
+            log.AppendLine($"Mp4DecodedDurationSeconds={mp4Info.DecodedDurationSeconds:F2}");
+            log.AppendLine($"Mp4DecodedFirstActiveSecond={mp4Info.DecodedTimeline.FirstActiveSecond:F1}");
+            log.AppendLine($"Mp4DecodedLastActiveSecond={mp4Info.DecodedTimeline.LastActiveSecond:F1}");
+            log.AppendLine($"Mp4DecodedActiveWindows={mp4Info.DecodedTimeline.ActiveWindowCount}");
+            log.AppendLine($"Mp4DecodedMaxConsecutiveActiveWindows={mp4Info.DecodedTimeline.MaxConsecutiveActiveWindows}");
+            log.AppendLine($"Mp4DecodedTimelineError={mp4Info.DecodedTimeline.Error ?? "(none)"}");
             log.AppendLine($"Mp4Error={mp4Info.Error ?? "(none)"}");
             log.AppendLine($"StoppedException={stoppedException?.Message ?? "(none)"}");
             log.AppendLine($"Result={(ok ? "OK" : "FAILED")}");
@@ -235,25 +247,30 @@ namespace ExpressPackingMonitoring
             return ok;
         }
 
-        private static (bool Valid, long FileBytes, bool AudioDecodeOk, string? Error) ProbeMp4Mux(string mkvPath, string wavPath, string mp4Path, int seconds, int audioSyncOffsetMs)
+        private static (bool Valid, long FileBytes, bool AudioDecodeOk, long DecodedFileBytes, double DecodedDurationSeconds, (bool Valid, double FirstActiveSecond, double LastActiveSecond, int ActiveWindowCount, int MaxConsecutiveActiveWindows, string? Error) DecodedTimeline, string? Error) ProbeMp4Mux(string mkvPath, string wavPath, string mp4Path, string decodedWavPath, int seconds, int audioSyncOffsetMs)
         {
             string? ffmpegPath = FindFFmpeg();
             if (string.IsNullOrEmpty(ffmpegPath))
-                return (false, 0, false, "ffmpeg.exe not found.");
+                return (false, 0, false, 0, 0, (false, -1, -1, 0, 0, "ffmpeg.exe not found."), "ffmpeg.exe not found.");
 
             if (!File.Exists(mkvPath) || new FileInfo(mkvPath).Length <= 0)
-                return (false, 0, false, "Video MKV was not generated.");
+                return (false, 0, false, 0, 0, (false, -1, -1, 0, 0, "Video MKV was not generated."), "Video MKV was not generated.");
 
             string muxArgs = MainViewModel.BuildMkvToMp4Args(mkvPath, wavPath, mp4Path, audioSyncOffsetMs);
             var mux = RunProcess(ffmpegPath, muxArgs, Math.Max(15000, seconds * 3000));
             if (!mux.Exited || mux.ExitCode != 0 || !File.Exists(mp4Path) || new FileInfo(mp4Path).Length <= 0)
-                return (false, File.Exists(mp4Path) ? new FileInfo(mp4Path).Length : 0, false, $"Mux failed: exited={mux.Exited}, exitCode={mux.ExitCode}, stderr={TrimForLog(mux.Stderr)}");
+                return (false, File.Exists(mp4Path) ? new FileInfo(mp4Path).Length : 0, false, 0, 0, (false, -1, -1, 0, 0, "Mux failed."), $"Mux failed: exited={mux.Exited}, exitCode={mux.ExitCode}, stderr={TrimForLog(mux.Stderr)}");
 
-            string decodeArgs = $"-v error -i \"{mp4Path}\" -map 0:a:0 -f null NUL";
+            string decodeArgs = $"-y -v error -i \"{mp4Path}\" -map 0:a:0 -ac 1 -ar 48000 -c:a pcm_s16le \"{decodedWavPath}\"";
             var decode = RunProcess(ffmpegPath, decodeArgs, Math.Max(15000, seconds * 3000));
-            bool decodeOk = decode.Exited && decode.ExitCode == 0;
+            bool decodeOk = decode.Exited
+                && decode.ExitCode == 0
+                && File.Exists(decodedWavPath)
+                && new FileInfo(decodedWavPath).Length > 0;
+            var decodedInfo = ReadWavInfo(decodedWavPath);
+            var decodedTimeline = ReadWavTimeline(decodedWavPath);
             string? error = decodeOk ? null : $"Audio decode failed: exited={decode.Exited}, exitCode={decode.ExitCode}, stderr={TrimForLog(decode.Stderr)}";
-            return (decodeOk, new FileInfo(mp4Path).Length, decodeOk, error);
+            return (decodeOk, new FileInfo(mp4Path).Length, decodeOk, decodedInfo.FileBytes, decodedInfo.DurationSeconds, decodedTimeline, error);
         }
 
         private static (bool Exited, int ExitCode, string Stderr) WriteSyntheticMkv(string ffmpegPath, string mkvPath, int seconds)
