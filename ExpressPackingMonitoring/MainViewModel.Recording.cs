@@ -1125,9 +1125,7 @@ namespace ExpressPackingMonitoring.ViewModels
                         RestartAudioCapture("no-data");
                     else if (shouldMonitor && bytes > 0)
                     {
-                        WriteAudioDiagnostic($"音频电平: peak={peak}, bytes={bytes}, silentCount={silentCount}, silentRestartThreshold=5");
-                        if (silentCount >= 5)
-                            RestartAudioCapture("silent-data");
+                        WriteAudioDiagnostic($"音频电平: peak={peak}, bytes={bytes}, silentCount={silentCount}, silentRestart=disabled");
                     }
                 }
                 catch (OperationCanceledException) { break; }
