@@ -9,6 +9,20 @@ namespace ExpressPackingMonitoring
     /// </summary>
     public partial class App : Application
     {
+        protected override void OnStartup(StartupEventArgs e)
+        {
+            base.OnStartup(e);
+
+            if (AudioProbe.TryHandleCommandLine(e.Args, out int exitCode))
+            {
+                Shutdown(exitCode);
+                return;
+            }
+
+            var window = new MainWindow();
+            MainWindow = window;
+            window.Show();
+        }
     }
 
 }

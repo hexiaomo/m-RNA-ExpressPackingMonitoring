@@ -58,6 +58,7 @@
   <ItemGroup>
     <Compile Include="App.xaml.cs" />
     <Compile Include="AppConfig.cs" />
+    <Compile Include="AudioProbe.cs" />
     <Compile Include="BarcodeHelper.cs" />
     <Compile Include="ConfirmDialog.xaml.cs" />
     <Compile Include="EncodingHelper.cs" />
