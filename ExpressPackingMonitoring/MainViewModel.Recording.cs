@@ -1164,14 +1164,17 @@ namespace ExpressPackingMonitoring.ViewModels
                     return;
                 }
 
-                process.StandardError.ReadToEnd();
-                process.WaitForExit();
+                string convertStderr;
+                bool convertExited = WaitForProcessExit(process, GetMediaProcessTimeoutMs(mkvPath, audioPath), out convertStderr);
 
                 bool hasExternalAudio = !string.IsNullOrEmpty(audioPath) && File.Exists(audioPath);
-                bool convertedOk = process.ExitCode == 0
+                bool convertedOk = convertExited
+                    && process.ExitCode == 0
                     && File.Exists(mp4Path)
                     && new FileInfo(mp4Path).Length > 0
                     && ValidateConvertedMp4(ffmpegPath, mp4Path, hasExternalAudio, audioLogPath);
+                if (!convertExited)
+                    WriteAudioDiagnostic($"MP4 转换超时: {convertStderr}", audioLogPath);
 
                 if (convertedOk)
                 {
@@ -1245,8 +1248,8 @@ namespace ExpressPackingMonitoring.ViewModels
                     return false;
                 }
 
-                string stderr = process.StandardError.ReadToEnd();
-                bool exited = process.WaitForExit(60000);
+                string stderr;
+                bool exited = WaitForProcessExit(process, GetMediaProcessTimeoutMs(mp4Path), out stderr);
 
                 if (!exited)
                 {
@@ -1290,6 +1293,53 @@ namespace ExpressPackingMonitoring.ViewModels
                 Debug.WriteLine($"[Audio] WAV 检查失败: {ex.Message}");
                 WriteAudioDiagnostic($"WAV 检查失败: {ex.Message}");
             }
+        }
+
+        private static bool WaitForProcessExit(Process process, int timeoutMs, out string stderr)
+        {
+            var stderrTask = process.StandardError.ReadToEndAsync();
+            var stdoutTask = process.StandardOutput.ReadToEndAsync();
+
+            bool exited = process.WaitForExit(timeoutMs);
+            if (!exited)
+            {
+                try { process.Kill(); } catch { }
+                try { process.WaitForExit(3000); } catch { }
+            }
+
+            stderr = TryGetProcessOutput(stderrTask);
+            _ = TryGetProcessOutput(stdoutTask);
+            return exited;
+        }
+
+        private static string TryGetProcessOutput(Task<string> outputTask)
+        {
+            try
+            {
+                return outputTask.Wait(3000) ? outputTask.Result : "";
+            }
+            catch
+            {
+                return "";
+            }
+        }
+
+        private static int GetMediaProcessTimeoutMs(params string?[] paths)
+        {
+            long totalBytes = 0;
+            foreach (var path in paths)
+            {
+                try
+                {
+                    if (!string.IsNullOrEmpty(path) && File.Exists(path))
+                        totalBytes += new FileInfo(path).Length;
+                }
+                catch { }
+            }
+
+            long totalMb = Math.Max(1, totalBytes / (1024L * 1024L));
+            long timeout = 60_000L + totalMb * 500L;
+            return (int)Math.Clamp(timeout, 60_000L, 600_000L);
         }
 
         private void WriteAudioDiagnostic(string message, string? explicitLogPath = null)
