@@ -1597,6 +1597,7 @@ namespace ExpressPackingMonitoring.ViewModels
 
             string videoFileToConvert = null;
             string audioFileToConvert = null;
+            string audioLogFileToUse = null;
             long recordId = 0;
             DateTime recordStart = DateTime.MinValue;
 
@@ -1605,6 +1606,7 @@ namespace ExpressPackingMonitoring.ViewModels
                 if (IsRecording)
                 {
                     videoFileToConvert = _currentVideoFilePath;
+                    audioLogFileToUse = _currentAudioLogPath;
                     recordId = _currentRecordId;
                     recordStart = _recordStartTime;
 
@@ -1640,7 +1642,7 @@ namespace ExpressPackingMonitoring.ViewModels
                     {
                         int durSec = Math.Max(1, (int)(DateTime.Now - recordStart).TotalSeconds);
                         _db?.UpdateVideoRecordOnStop(recordId, DateTime.Now, durSec, fileSize, _stopReason, _currentVideoCodec, _currentVideoEncoder);
-                        ConvertMkvToMp4(videoFileToConvert, audioFileToConvert);
+                        ConvertMkvToMp4(videoFileToConvert, audioFileToConvert, audioLogFileToUse);
                     }
                     else
                     {

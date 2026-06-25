@@ -93,6 +93,7 @@ namespace ExpressPackingMonitoring.ViewModels
             var stopReason = _stopReason;
             var scanRecord = _currentScanRecord;
             var recordId = _currentRecordId; 
+            var audioLogPath = _currentAudioLogPath;
 
             _recordStartTime = DateTime.MinValue;
             _currentScanRecord = null;
@@ -139,7 +140,7 @@ namespace ExpressPackingMonitoring.ViewModels
                         _db?.UpdateVideoRecordOnStop(recordId, DateTime.Now, durSec, fileSize, stopReason, videoCodec, videoEncoder);
 
                         // 自动将 MKV 转换为 MP4（无损容器转换）
-                        ConvertMkvToMp4(filePath, audioFilePath);
+                        ConvertMkvToMp4(filePath, audioFilePath, audioLogPath);
 
                         _ = Application.Current.Dispatcher.InvokeAsync(() => {
                             if (!_isDisposed && scanRecord != null)
@@ -153,11 +154,13 @@ namespace ExpressPackingMonitoring.ViewModels
                 }
                 catch (Exception ex)
                 {
+                    WriteAudioDiagnostic($"Finalize exception: {ex.Message}", audioLogPath);
                     WriteAudioDiagnostic($"Finalize 异常: {ex.Message}");
                 }
                 finally
                 {
-                    _currentAudioLogPath = null;
+                    if (string.Equals(_currentAudioLogPath, audioLogPath, StringComparison.OrdinalIgnoreCase))
+                        _currentAudioLogPath = null;
                 }
             });
             
@@ -1123,7 +1126,7 @@ namespace ExpressPackingMonitoring.ViewModels
         /// <summary>
         /// 录制完成后自动将 MKV 无损转换为 MP4（容器转换，不重新编码）
         /// </summary>
-        private void ConvertMkvToMp4(string mkvPath, string? audioPath = null)
+        private void ConvertMkvToMp4(string mkvPath, string? audioPath = null, string? audioLogPath = null)
         {
             try
             {
@@ -1138,7 +1141,7 @@ namespace ExpressPackingMonitoring.ViewModels
                 }
 
                 string mp4Path = Path.ChangeExtension(mkvPath, ".mp4");
-                LogAudioCaptureSummary(audioPath);
+                LogAudioCaptureSummary(audioPath, audioLogPath);
 
                 var psi = new ProcessStartInfo
                 {
@@ -1164,7 +1167,7 @@ namespace ExpressPackingMonitoring.ViewModels
                 bool convertedOk = process.ExitCode == 0
                     && File.Exists(mp4Path)
                     && new FileInfo(mp4Path).Length > 0
-                    && ValidateConvertedMp4(ffmpegPath, mp4Path, hasExternalAudio);
+                    && ValidateConvertedMp4(ffmpegPath, mp4Path, hasExternalAudio, audioLogPath);
 
                 if (convertedOk)
                 {
@@ -1214,7 +1217,7 @@ namespace ExpressPackingMonitoring.ViewModels
             return $"-y -i \"{mkvPath}\" -i \"{audioPath}\"{filter} -map 0:v:0 -map \"{audioMap}\" -c:v copy -c:a aac -b:a 128k -shortest \"{mp4Path}\"";
         }
 
-        private bool ValidateConvertedMp4(string ffmpegPath, string mp4Path, bool requireAudio)
+        private bool ValidateConvertedMp4(string ffmpegPath, string mp4Path, bool requireAudio, string? audioLogPath)
         {
             if (!File.Exists(mp4Path)) return false;
             if (!requireAudio) return true;
@@ -1249,6 +1252,7 @@ namespace ExpressPackingMonitoring.ViewModels
                 }
 
                 bool ok = process.ExitCode == 0;
+                WriteAudioDiagnostic($"MP4 audio validation result: ok={ok}, exitCode={process.ExitCode}", audioLogPath);
                 if (!ok)
                 {
                     Debug.WriteLine($"[MkvToMp4] 音轨校验失败: {stderr}");
@@ -1266,7 +1270,7 @@ namespace ExpressPackingMonitoring.ViewModels
             }
         }
 
-        private void LogAudioCaptureSummary(string? audioPath)
+        private void LogAudioCaptureSummary(string? audioPath, string? audioLogPath)
         {
             if (string.IsNullOrEmpty(audioPath) || !File.Exists(audioPath)) return;
 
@@ -1275,7 +1279,7 @@ namespace ExpressPackingMonitoring.ViewModels
                 using var reader = new WaveFileReader(audioPath);
                 string summary = $"WAV 时长={reader.TotalTime.TotalSeconds:F1}s 大小={new FileInfo(audioPath).Length} bytes 写入字节={_audioBytesWritten}";
                 Debug.WriteLine($"[Audio] {summary}");
-                WriteAudioDiagnostic(summary);
+                WriteAudioDiagnostic(summary, audioLogPath);
             }
             catch (Exception ex)
             {
@@ -1284,9 +1288,15 @@ namespace ExpressPackingMonitoring.ViewModels
             }
         }
 
-        private void WriteAudioDiagnostic(string message)
+        private void WriteAudioDiagnostic(string message, string? explicitLogPath = null)
         {
-            string? logPath = _currentAudioLogPath;
+            if (explicitLogPath == null && message.StartsWith("Finalize ", StringComparison.Ordinal))
+                return;
+            if (explicitLogPath == null
+                && (message.StartsWith("MP4 ", StringComparison.Ordinal) || message.StartsWith("WAV ", StringComparison.Ordinal)))
+                return;
+
+            string? logPath = explicitLogPath ?? _currentAudioLogPath;
             if (string.IsNullOrWhiteSpace(logPath)) return;
 
             try
