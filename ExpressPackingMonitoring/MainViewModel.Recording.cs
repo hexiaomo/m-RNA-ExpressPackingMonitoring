@@ -822,7 +822,7 @@ namespace ExpressPackingMonitoring.ViewModels
                 lock (_audioLock)
                 {
                     if (_audioWriter == null || e.BytesRecorded <= 0) return;
-                    byte[]? pcmBytes = ConvertCaptureBufferToPcm16(e.Buffer, e.BytesRecorded, capture.WaveFormat);
+                    byte[]? pcmBytes = ConvertCaptureBufferToPcm16(e.Buffer, e.BytesRecorded, capture.WaveFormat, _audioWriter.WaveFormat);
                     if (pcmBytes == null || pcmBytes.Length == 0)
                     {
                         WriteAudioDiagnostic($"麦克风格式暂不支持转换: format={capture.WaveFormat}, bytes={e.BytesRecorded}");
@@ -893,21 +893,21 @@ namespace ExpressPackingMonitoring.ViewModels
         private static WaveFormat CreatePcm16WaveFormat(WaveFormat sourceFormat)
         {
             int sampleRate = Math.Max(8000, sourceFormat.SampleRate);
-            int channels = Math.Clamp(sourceFormat.Channels, 1, 8);
-            return new WaveFormat(sampleRate, 16, channels);
+            return new WaveFormat(sampleRate, 16, 1);
         }
 
-        private static byte[]? ConvertCaptureBufferToPcm16(byte[] buffer, int bytesRecorded, WaveFormat sourceFormat)
+        private static byte[]? ConvertCaptureBufferToPcm16(byte[] buffer, int bytesRecorded, WaveFormat sourceFormat, WaveFormat targetFormat)
         {
             if (bytesRecorded <= 0) return Array.Empty<byte>();
 
-            int channels = sourceFormat.Channels;
+            int sourceChannels = sourceFormat.Channels;
+            int targetChannels = targetFormat.Channels;
             int blockAlign = sourceFormat.BlockAlign;
             int bitsPerSample = sourceFormat.BitsPerSample;
-            if (channels <= 0 || blockAlign <= 0 || bitsPerSample <= 0) return null;
+            if (sourceChannels <= 0 || targetChannels != 1 || blockAlign <= 0 || bitsPerSample <= 0) return null;
 
             int bytesPerSample = bitsPerSample / 8;
-            if (bytesPerSample <= 0 || blockAlign < channels * bytesPerSample) return null;
+            if (bytesPerSample <= 0 || blockAlign < sourceChannels * bytesPerSample) return null;
 
             int frames = bytesRecorded / blockAlign;
             if (frames <= 0) return Array.Empty<byte>();
@@ -916,8 +916,27 @@ namespace ExpressPackingMonitoring.ViewModels
             bool isPcm = IsPcmWaveFormat(sourceFormat);
             if (!isFloat && !isPcm) return null;
 
-            byte[] output = new byte[frames * channels * 2];
+            int selectedChannel = SelectStrongestAudioChannel(buffer, frames, sourceChannels, blockAlign, bytesPerSample, isFloat);
+            byte[] output = new byte[frames * targetChannels * 2];
             int outOffset = 0;
+            for (int frame = 0; frame < frames; frame++)
+            {
+                int frameOffset = frame * blockAlign;
+                int sampleOffset = frameOffset + selectedChannel * bytesPerSample;
+                short monoSample = isFloat
+                    ? ReadFloatSampleAsPcm16(buffer, sampleOffset, bytesPerSample)
+                    : ReadPcmSampleAsPcm16(buffer, sampleOffset, bytesPerSample);
+                output[outOffset++] = (byte)(monoSample & 0xff);
+                output[outOffset++] = (byte)((monoSample >> 8) & 0xff);
+            }
+            return output;
+        }
+
+        private static int SelectStrongestAudioChannel(byte[] buffer, int frames, int channels, int blockAlign, int bytesPerSample, bool isFloat)
+        {
+            if (channels <= 1) return 0;
+
+            long[] energy = new long[channels];
             for (int frame = 0; frame < frames; frame++)
             {
                 int frameOffset = frame * blockAlign;
@@ -927,11 +946,21 @@ namespace ExpressPackingMonitoring.ViewModels
                     short sample = isFloat
                         ? ReadFloatSampleAsPcm16(buffer, sampleOffset, bytesPerSample)
                         : ReadPcmSampleAsPcm16(buffer, sampleOffset, bytesPerSample);
-                    output[outOffset++] = (byte)(sample & 0xff);
-                    output[outOffset++] = (byte)((sample >> 8) & 0xff);
+                    energy[channel] += Math.Abs((int)sample);
                 }
             }
-            return output;
+
+            int selected = 0;
+            long strongest = energy[0];
+            for (int channel = 1; channel < channels; channel++)
+            {
+                if (energy[channel] > strongest)
+                {
+                    selected = channel;
+                    strongest = energy[channel];
+                }
+            }
+            return selected;
         }
 
         private static bool IsFloatWaveFormat(WaveFormat format)
