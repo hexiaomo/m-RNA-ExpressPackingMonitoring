@@ -11,6 +11,7 @@ using System.Windows.Input;
 using System.Threading;
 using System.IO;
 using ExpressPackingMonitoring.Services;
+using NAudio.CoreAudioApi;
 
 namespace ExpressPackingMonitoring
 {
@@ -213,9 +214,10 @@ namespace ExpressPackingMonitoring
 
                 try
                 {
-                    var audioDevices = new FilterInfoCollection(new Guid("33D9A762-90C8-11D0-BD43-00A0C911CE86"));
+                    using var enumerator = new MMDeviceEnumerator();
+                    var audioDevices = enumerator.EnumerateAudioEndPoints(DataFlow.Capture, DeviceState.Active);
                     for (int i = 0; i < audioDevices.Count; i++)
-                        micList.Add(new MicInfo { Name = audioDevices[i].Name, Moniker = audioDevices[i].MonikerString });
+                        micList.Add(new MicInfo { Name = audioDevices[i].FriendlyName, Moniker = audioDevices[i].ID });
                 }
                 catch { }
 

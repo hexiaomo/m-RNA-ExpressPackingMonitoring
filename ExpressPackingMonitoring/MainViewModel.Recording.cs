@@ -307,12 +307,7 @@ namespace ExpressPackingMonitoring.ViewModels
 
                 if (Config.EnableAudioRecording && HasConfiguredAudioDevice())
                 {
-                    bool micFound = await Task.Run(() => {
-                        var audioDevices = new FilterInfoCollection(new Guid("33D9A762-90C8-11D0-BD43-00A0C911CE86"));
-                        for (int i = 0; i < audioDevices.Count; i++)
-                            if (IsConfiguredAudioDevice(audioDevices[i].Name, audioDevices[i].MonikerString)) return true;
-                        return false;
-                    });
+                    bool micFound = await Task.Run(() => ResolveAudioEndpoint() != null);
                     if (!micFound)
                     {
                         ShowToast("⚠ 预设麦克风已断开");
@@ -960,13 +955,20 @@ namespace ExpressPackingMonitoring.ViewModels
                     else
                     {
                         _audioConvertFailureCount = 0;
-                        if (selectedChannel != _audioSelectedSourceChannel)
+                        bool suppressing = now < _audioSuppressUntil;
+                        if (suppressing)
+                        {
+                            Array.Clear(pcmBytes, 0, pcmBytes.Length);
+                            _audioSelectedSourceChannel = -1;
+                            _audioResamplePosition = 0;
+                            _audioPreviousSourceSample = 0;
+                            _audioHasPreviousSourceSample = false;
+                        }
+                        else if (selectedChannel != _audioSelectedSourceChannel)
                         {
                             _audioSelectedSourceChannel = selectedChannel;
                             diagnosticMessage = $"麦克风输入通道已选择: channel={selectedChannel}, sourceChannels={capture.WaveFormat.Channels}";
                         }
-                        if (now < _audioSuppressUntil)
-                            Array.Clear(pcmBytes, 0, pcmBytes.Length);
                         var gapDiagnostic = PadAudioGapIfNeeded(now);
                         if (!string.IsNullOrEmpty(gapDiagnostic))
                             diagnosticMessage = string.IsNullOrEmpty(diagnosticMessage)
@@ -1757,7 +1759,7 @@ namespace ExpressPackingMonitoring.ViewModels
             var summary = LogAudioCaptureSummary(audioPath, audioLogPath, audioBytesWritten);
             if (!summary.Checked) return true;
 
-            if (!IsAudioTimelineUsable(summary.DurationSeconds, summary.LastActiveSecond, summary.ActiveWindowCount, out string reason))
+            if (!IsAudioTimelineUsable(summary.DurationSeconds, summary.FirstActiveSecond, summary.LastActiveSecond, summary.ActiveWindowCount, summary.MaxConsecutiveActiveWindows, out string reason))
             {
                 WriteAudioDiagnostic($"WAV 音频疑似提前静音: {reason}", audioLogPath);
                 return false;
@@ -1765,10 +1767,10 @@ namespace ExpressPackingMonitoring.ViewModels
             return true;
         }
 
-        private (bool Checked, double DurationSeconds, double LastActiveSecond, int ActiveWindowCount) LogAudioCaptureSummary(string? audioPath, string? audioLogPath, long audioBytesWritten)
+        private (bool Checked, double DurationSeconds, double FirstActiveSecond, double LastActiveSecond, int ActiveWindowCount, int MaxConsecutiveActiveWindows) LogAudioCaptureSummary(string? audioPath, string? audioLogPath, long audioBytesWritten)
         {
             if (string.IsNullOrEmpty(audioPath) || !File.Exists(audioPath))
-                return (false, 0, -1, 0);
+                return (false, 0, -1, -1, 0, 0);
 
             try
             {
@@ -1777,17 +1779,17 @@ namespace ExpressPackingMonitoring.ViewModels
                 Debug.WriteLine($"[Audio] {summary}");
                 WriteAudioDiagnostic(summary, audioLogPath);
                 var timeline = LogAudioPeakTimeline(reader, audioLogPath);
-                return (true, reader.TotalTime.TotalSeconds, timeline.LastActiveSecond, timeline.ActiveWindowCount);
+                return (true, reader.TotalTime.TotalSeconds, timeline.FirstActiveSecond, timeline.LastActiveSecond, timeline.ActiveWindowCount, timeline.MaxConsecutiveActiveWindows);
             }
             catch (Exception ex)
             {
                 Debug.WriteLine($"[Audio] WAV 检查失败: {ex.Message}");
                 WriteAudioDiagnostic($"WAV 检查失败: {ex.Message}");
-                return (false, 0, -1, 0);
+                return (false, 0, -1, -1, 0, 0);
             }
         }
 
-        private static bool IsAudioTimelineUsable(double durationSeconds, double lastActiveSecond, int activeWindowCount, out string reason)
+        private static bool IsAudioTimelineUsable(double durationSeconds, double firstActiveSecond, double lastActiveSecond, int activeWindowCount, int maxConsecutiveActiveWindows, out string reason)
         {
             reason = string.Empty;
             if (durationSeconds < 10) return true;
@@ -1800,6 +1802,15 @@ namespace ExpressPackingMonitoring.ViewModels
 
             double trailingSilentSeconds = durationSeconds - lastActiveSecond;
             if (durationSeconds >= 30
+                && activeWindowCount > 0
+                && activeWindowCount <= 4
+                && maxConsecutiveActiveWindows <= 2)
+            {
+                reason = $"duration={durationSeconds:F1}s, firstActive={firstActiveSecond:F1}s, lastActive={lastActiveSecond:F1}s, activeWindows={activeWindowCount}, maxConsecutive={maxConsecutiveActiveWindows}";
+                return false;
+            }
+
+            if (durationSeconds >= 30
                 && trailingSilentSeconds >= 15
                 && activeWindowCount <= 3)
             {
@@ -1810,21 +1821,24 @@ namespace ExpressPackingMonitoring.ViewModels
             return true;
         }
 
-        private (double LastActiveSecond, int ActiveWindowCount) LogAudioPeakTimeline(WaveFileReader reader, string? audioLogPath)
+        private (double FirstActiveSecond, double LastActiveSecond, int ActiveWindowCount, int MaxConsecutiveActiveWindows) LogAudioPeakTimeline(WaveFileReader reader, string? audioLogPath)
         {
             try
             {
                 reader.Position = 0;
                 int bytesPerSecond = Math.Max(1, reader.WaveFormat.AverageBytesPerSecond);
                 int blockAlign = Math.Max(1, reader.WaveFormat.BlockAlign);
-                int windowBytes = bytesPerSecond * 5;
+                int windowBytes = bytesPerSecond;
                 windowBytes -= windowBytes % blockAlign;
                 if (windowBytes <= 0) windowBytes = bytesPerSecond;
 
                 byte[] buffer = new byte[windowBytes];
                 int windowIndex = 0;
+                double firstActiveSecond = -1;
                 double lastActiveSecond = -1;
                 int activeWindowCount = 0;
+                int consecutiveActiveWindows = 0;
+                int maxConsecutiveActiveWindows = 0;
                 var parts = new List<string>();
 
                 while (true)
@@ -1840,27 +1854,36 @@ namespace ExpressPackingMonitoring.ViewModels
 
                     short peak;
                     bool known = TryGetAudioPeak(buffer, totalRead, reader.WaveFormat, out peak);
-                    double start = windowIndex * 5.0;
+                    double start = windowIndex;
                     double end = Math.Min(reader.TotalTime.TotalSeconds, start + (double)totalRead / bytesPerSecond);
                     parts.Add(known ? $"{start:F0}-{end:F0}s={peak}" : $"{start:F0}-{end:F0}s=unknown");
-                    if (known && peak > 16)
+                    if (known && peak > 32)
                     {
+                        if (firstActiveSecond < 0)
+                            firstActiveSecond = start;
                         lastActiveSecond = end;
                         activeWindowCount++;
+                        consecutiveActiveWindows++;
+                        if (consecutiveActiveWindows > maxConsecutiveActiveWindows)
+                            maxConsecutiveActiveWindows = consecutiveActiveWindows;
+                    }
+                    else
+                    {
+                        consecutiveActiveWindows = 0;
                     }
                     windowIndex++;
                 }
 
-                string timeline = $"WAV 分段峰值: {string.Join("; ", parts)}; lastActive={lastActiveSecond:F1}s; activeWindows={activeWindowCount}; activeThreshold=16";
+                string timeline = $"WAV 分段峰值: {string.Join("; ", parts)}; firstActive={firstActiveSecond:F1}s; lastActive={lastActiveSecond:F1}s; activeWindows={activeWindowCount}; maxConsecutive={maxConsecutiveActiveWindows}; activeThreshold=32";
                 Debug.WriteLine($"[Audio] {timeline}");
                 WriteAudioDiagnostic(timeline, audioLogPath);
-                return (lastActiveSecond, activeWindowCount);
+                return (firstActiveSecond, lastActiveSecond, activeWindowCount, maxConsecutiveActiveWindows);
             }
             catch (Exception ex)
             {
                 Debug.WriteLine($"[Audio] WAV 分段峰值检查失败: {ex.Message}");
                 WriteAudioDiagnostic($"WAV 分段峰值检查失败: {ex.Message}", audioLogPath);
-                return (-1, 0);
+                return (-1, -1, 0, 0);
             }
         }
 
