@@ -730,7 +730,7 @@ namespace ExpressPackingMonitoring.ViewModels
                 var capture = CreateWasapiCapture(device);
                 var writerFormat = CreatePcm16WaveFormat(capture.WaveFormat);
                 var writer = new WaveFileWriter(audioFilePath, writerFormat);
-                var writeQueue = new BlockingCollection<byte[]>();
+                var writeQueue = new BlockingCollection<byte[]>(boundedCapacity: 150);
                 var writeTask = Task.Run(() => AudioFileWriteLoop(writer, writeQueue));
 
                 lock (_audioLock)
@@ -756,6 +756,7 @@ namespace ExpressPackingMonitoring.ViewModels
                     _audioPreviousSourceSample = 0;
                     _audioHasPreviousSourceSample = false;
                     _audioWriteFailed = false;
+                    _audioWriteQueueFullLogged = false;
                     _audioMonitorCts = new CancellationTokenSource();
                 }
 
@@ -1011,16 +1012,25 @@ namespace ExpressPackingMonitoring.ViewModels
             {
                 if (!_audioWriteQueue.TryAdd(bytes))
                 {
-                    _audioWriteFailed = true;
+                    MarkAudioWriteQueueFull();
                     return 0;
                 }
                 return bytes.Length;
             }
             catch
             {
-                _audioWriteFailed = true;
+                MarkAudioWriteQueueFull();
                 return 0;
             }
+        }
+
+        private void MarkAudioWriteQueueFull()
+        {
+            _audioWriteFailed = true;
+            if (_audioWriteQueueFullLogged) return;
+
+            _audioWriteQueueFullLogged = true;
+            WriteAudioDiagnostic("WAV 写入队列已满，放弃本次音频");
         }
 
         private void AudioFileWriteLoop(WaveFileWriter writer, BlockingCollection<byte[]> queue)

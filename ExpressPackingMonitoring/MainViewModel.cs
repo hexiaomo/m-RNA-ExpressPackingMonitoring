@@ -56,6 +56,7 @@ namespace ExpressPackingMonitoring.ViewModels
         private BlockingCollection<byte[]> _audioWriteQueue;
         private Task _audioFileWriteTask;
         private bool _audioWriteFailed;
+        private bool _audioWriteQueueFullLogged;
         private string _currentAudioFilePath;
         private string _currentAudioLogPath;
         private CancellationTokenSource _audioMonitorCts;
