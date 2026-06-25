@@ -1534,8 +1534,10 @@ namespace ExpressPackingMonitoring.ViewModels
             MMDevice? defaultDevice = null;
             try { defaultDevice = enumerator.GetDefaultAudioEndpoint(DataFlow.Capture, Role.Console); } catch { }
 
+            bool hasConfiguredEndpoint = false;
             if (!string.IsNullOrWhiteSpace(Config.AudioDeviceMoniker))
             {
+                hasConfiguredEndpoint = true;
                 foreach (var device in devices)
                 {
                     if (AudioEndpointMatches(device.ID, Config.AudioDeviceMoniker))
@@ -1545,6 +1547,7 @@ namespace ExpressPackingMonitoring.ViewModels
 
             if (!string.IsNullOrWhiteSpace(Config.AudioDeviceName))
             {
+                hasConfiguredEndpoint = true;
                 foreach (var device in devices)
                 {
                     if (AudioEndpointMatches(device.FriendlyName, Config.AudioDeviceName)
@@ -1552,6 +1555,9 @@ namespace ExpressPackingMonitoring.ViewModels
                         return device;
                 }
             }
+
+            if (hasConfiguredEndpoint)
+                return null;
 
             return defaultDevice ?? devices[0];
         }
