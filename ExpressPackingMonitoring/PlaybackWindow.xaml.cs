@@ -356,7 +356,6 @@ namespace ExpressPackingMonitoring
                 using var media = new Media(_libVLC!, new Uri(video.FullPath));
 
                 // 增加一些优化参数，减少内存压力
-                media.AddOption(":no-audio"); // 如果回放不需要声音可以加上，减轻解码负担
                 media.AddOption(":file-caching=300"); // 减小缓存
 
                 if (!_mediaPlayer!.Play(media))

@@ -286,12 +286,12 @@ namespace ExpressPackingMonitoring.ViewModels
                     }
                 }
 
-                if (Config.EnableAudioRecording && !string.IsNullOrEmpty(Config.AudioDeviceName))
+                if (Config.EnableAudioRecording && HasConfiguredAudioDevice())
                 {
                     bool micFound = await Task.Run(() => {
                         var audioDevices = new FilterInfoCollection(new Guid("33D9A762-90C8-11D0-BD43-00A0C911CE86"));
                         for (int i = 0; i < audioDevices.Count; i++)
-                            if (audioDevices[i].Name == Config.AudioDeviceName) return true;
+                            if (IsConfiguredAudioDevice(audioDevices[i].Name, audioDevices[i].MonikerString)) return true;
                         return false;
                     });
                     if (!micFound)
@@ -408,7 +408,7 @@ namespace ExpressPackingMonitoring.ViewModels
             int h = Config.FrameHeight;
             int fps = _actualCameraFps > 0 ? _actualCameraFps : Config.Fps;
             string encoder = ResolveEncoder();
-            bool hasAudio = Config.EnableAudioRecording && !string.IsNullOrEmpty(Config.AudioDeviceName);
+            bool hasAudio = Config.EnableAudioRecording && HasConfiguredAudioDevice();
             string requestedEncoder = encoder;
 
             var (ok, err) = RunFFmpegPipeline(filePath, ffmpegPath, token, w, h, fps, encoder, hasAudio);
@@ -647,10 +647,10 @@ namespace ExpressPackingMonitoring.ViewModels
             int cqp = GetVideoCqp();
             int gop = Math.Max(1, fps * 2);
 
-            bool hasAudio = withAudio && Config.EnableAudioRecording && !string.IsNullOrEmpty(Config.AudioDeviceName);
+            bool hasAudio = withAudio && Config.EnableAudioRecording && HasConfiguredAudioDevice();
             if (hasAudio)
             {
-                args += $" -thread_queue_size 256 -use_wallclock_as_timestamps 1 -f dshow -audio_buffer_size 50 -i audio=\"{Config.AudioDeviceName}\"";
+                args += $" -thread_queue_size 256 -use_wallclock_as_timestamps 1 -f dshow -audio_buffer_size 50 -i audio=\"{EscapeDShowDeviceName(GetAudioDeviceInputName())}\"";
             }
 
             if (encoder == "h264_nvenc") args += $" -c:v h264_nvenc -pix_fmt yuv420p -preset p4 -rc vbr -cq {cqp} -b:v 0 -g {gop} -max_muxing_queue_size 1024";
@@ -699,6 +699,35 @@ namespace ExpressPackingMonitoring.ViewModels
                 return $"atrim=start={trimStartSec:0.###},asetpts=PTS-STARTPTS,aresample=async=1:first_pts=0";
             }
             return "aresample=async=1:first_pts=0";
+        }
+
+        private bool HasConfiguredAudioDevice()
+        {
+            return !string.IsNullOrWhiteSpace(Config.AudioDeviceMoniker)
+                || (!string.IsNullOrWhiteSpace(Config.AudioDeviceName)
+                    && Config.AudioDeviceName != "未检测到麦克风");
+        }
+
+        private bool IsConfiguredAudioDevice(string name, string moniker)
+        {
+            if (!string.IsNullOrWhiteSpace(Config.AudioDeviceMoniker)
+                && string.Equals(moniker, Config.AudioDeviceMoniker, StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            return !string.IsNullOrWhiteSpace(Config.AudioDeviceName)
+                && string.Equals(name, Config.AudioDeviceName, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private string GetAudioDeviceInputName()
+        {
+            return !string.IsNullOrWhiteSpace(Config.AudioDeviceMoniker)
+                ? Config.AudioDeviceMoniker
+                : Config.AudioDeviceName;
+        }
+
+        private static string EscapeDShowDeviceName(string deviceName)
+        {
+            return (deviceName ?? "").Replace("\"", "\\\"");
         }
 
         private int GetVideoCqp() => Config.VideoCqp > 0 ? Config.VideoCqp : 25;

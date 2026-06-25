@@ -44,6 +44,7 @@ namespace ExpressPackingMonitoring.ViewModels
         public int FrameHeight { get; set; } = 720;
         public int Fps { get; set; } = 15;
         public string AudioDeviceName { get; set; } = "";
+        public string AudioDeviceMoniker { get; set; } = "";
         public int AudioSyncOffsetMs { get; set; } = 400;
     }
 
@@ -84,6 +85,7 @@ namespace ExpressPackingMonitoring.ViewModels
         public bool AutoStartOnBoot { get; set; } = false;
         public bool EnableAudioRecording { get; set; } = true;
         public string AudioDeviceName { get; set; } = "";
+        public string AudioDeviceMoniker { get; set; } = "";
         public int AudioSyncOffsetMs { get; set; } = 400;
         public double BarcodeCooldownSeconds { get; set; } = 2.0;
         public string GpuEncoder { get; set; } = "nvidia";

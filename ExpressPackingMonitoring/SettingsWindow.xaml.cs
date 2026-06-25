@@ -16,7 +16,12 @@ namespace ExpressPackingMonitoring
 {
     public class CameraInfo { public int Index { get; set; } public string Name { get; set; } public string Moniker { get; set; } public override string ToString() => Name; }
     public class ResOption { public string Name { get; set; } public int Width { get; set; } public int Height { get; set; } public override string ToString() => Name; }
-    public class MicInfo { public string Name { get; set; } public override string ToString() => Name; }
+    public class MicInfo
+    {
+        public string Name { get; set; }
+        public string Moniker { get; set; }
+        public override string ToString() => Name;
+    }
     public class FpsOption { public int Fps { get; set; } public string Label { get; set; } public override string ToString() => Label; }
     public class EdgeVoiceOption { public string ShortName { get; set; } public string DisplayName { get; set; } public override string ToString() => DisplayName; }
 
@@ -210,7 +215,7 @@ namespace ExpressPackingMonitoring
                 {
                     var audioDevices = new FilterInfoCollection(new Guid("33D9A762-90C8-11D0-BD43-00A0C911CE86"));
                     for (int i = 0; i < audioDevices.Count; i++)
-                        micList.Add(new MicInfo { Name = audioDevices[i].Name });
+                        micList.Add(new MicInfo { Name = audioDevices[i].Name, Moniker = audioDevices[i].MonikerString });
                 }
                 catch { }
 
@@ -229,8 +234,13 @@ namespace ExpressPackingMonitoring
             if (mics.Count == 0)
                 mics.Add(new MicInfo { Name = "未检测到麦克风" });
             MicComboBox.ItemsSource = mics;
-            if (string.IsNullOrEmpty(config.AudioDeviceName) && mics.Count > 0)
-                config.AudioDeviceName = mics[0].Name;
+            var firstAvailableMic = mics.FirstOrDefault(IsAvailableMic);
+            if (string.IsNullOrEmpty(config.AudioDeviceName) && firstAvailableMic != null)
+            {
+                config.AudioDeviceName = firstAvailableMic.Name;
+                config.AudioDeviceMoniker = firstAvailableMic.Moniker ?? "";
+            }
+            SelectMicByConfig(mics);
 
             // 更新分辨率
             var resolutions = result.Resolutions;
@@ -347,16 +357,13 @@ namespace ExpressPackingMonitoring
                     h = settings.FrameHeight;
                     fps = settings.Fps;
                     Config.AudioDeviceName = settings.AudioDeviceName ?? "";
+                    Config.AudioDeviceMoniker = settings.AudioDeviceMoniker ?? "";
                     Config.AudioSyncOffsetMs = settings.AudioSyncOffsetMs;
 
                     // 切换麦克风 UI 选中项
                     if (MicComboBox.ItemsSource is List<MicInfo> mics)
                     {
-                        var micMatch = mics.FirstOrDefault(m => m.Name == Config.AudioDeviceName);
-                        if (micMatch != null)
-                        {
-                            MicComboBox.SelectedItem = micMatch;
-                        }
+                        SelectMicByConfig(mics);
                     }
                 }
 
@@ -492,6 +499,7 @@ namespace ExpressPackingMonitoring
         private void BtnSave_Click(object sender, RoutedEventArgs e)
         {
             Keyboard.ClearFocus();
+            SyncSelectedMicToConfig();
 
             // 0. 验证音频
             if (Config.EnableAudioRecording && string.IsNullOrEmpty(Config.AudioDeviceName))
@@ -530,6 +538,7 @@ namespace ExpressPackingMonitoring
                         FrameHeight = Config.FrameHeight,
                         Fps = Config.Fps,
                         AudioDeviceName = Config.AudioDeviceName,
+                        AudioDeviceMoniker = Config.AudioDeviceMoniker,
                         AudioSyncOffsetMs = Config.AudioSyncOffsetMs
                     };
                 }
@@ -569,6 +578,43 @@ namespace ExpressPackingMonitoring
             {
                 MainVM.PreviewZoomScale = scale;
             }
+        }
+
+        private void SelectMicByConfig(List<MicInfo> mics)
+        {
+            var micMatch = mics.FirstOrDefault(m => !string.IsNullOrEmpty(Config.AudioDeviceMoniker)
+                                                    && m.Moniker == Config.AudioDeviceMoniker)
+                        ?? mics.FirstOrDefault(m => m.Name == Config.AudioDeviceName);
+            if (micMatch != null)
+            {
+                MicComboBox.SelectedItem = micMatch;
+                if (IsAvailableMic(micMatch))
+                {
+                    Config.AudioDeviceName = micMatch.Name;
+                    Config.AudioDeviceMoniker = micMatch.Moniker ?? "";
+                }
+            }
+        }
+
+        private void SyncSelectedMicToConfig()
+        {
+            if (MicComboBox.SelectedItem is MicInfo mic && IsAvailableMic(mic))
+            {
+                Config.AudioDeviceName = mic.Name;
+                Config.AudioDeviceMoniker = mic.Moniker ?? "";
+            }
+            else
+            {
+                Config.AudioDeviceName = "";
+                Config.AudioDeviceMoniker = "";
+            }
+        }
+
+        private static bool IsAvailableMic(MicInfo mic)
+        {
+            return mic != null
+                && !string.IsNullOrWhiteSpace(mic.Name)
+                && mic.Name != "未检测到麦克风";
         }
 
         protected override void OnClosed(EventArgs e)
