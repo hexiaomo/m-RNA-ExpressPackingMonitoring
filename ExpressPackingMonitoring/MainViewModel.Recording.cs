@@ -33,6 +33,7 @@ namespace ExpressPackingMonitoring.ViewModels
             Task oldWriteTask;
             string? audioFilePath;
             bool audioFailedForThisRecording;
+            long audioBytesWrittenForThisRecording;
 
             lock (_videoLock)
             {
@@ -49,6 +50,7 @@ namespace ExpressPackingMonitoring.ViewModels
             oldCts?.Cancel(); // 3. 通知 FFmpeg 线程停止
             audioFilePath = StopAudioRecording();
             audioFailedForThisRecording = _audioFailedForCurrentRecording;
+            audioBytesWrittenForThisRecording = _audioBytesWritten;
 
             // 4. 等待录制线程真正退出（FFmpeg 进程关闭）
             try
@@ -142,7 +144,7 @@ namespace ExpressPackingMonitoring.ViewModels
                         _db?.UpdateVideoRecordOnStop(recordId, DateTime.Now, durSec, fileSize, stopReason, videoCodec, videoEncoder);
 
                         // 自动将 MKV 转换为 MP4（无损容器转换）
-                        ConvertMkvToMp4(filePath, audioFilePath, audioLogPath, audioFailedForThisRecording);
+                        ConvertMkvToMp4(filePath, audioFilePath, audioLogPath, audioFailedForThisRecording, audioBytesWrittenForThisRecording);
 
                         _ = Application.Current.Dispatcher.InvokeAsync(() => {
                             if (!_isDisposed && scanRecord != null)
@@ -1576,7 +1578,7 @@ namespace ExpressPackingMonitoring.ViewModels
         /// <summary>
         /// 录制完成后自动将 MKV 无损转换为 MP4（容器转换，不重新编码）
         /// </summary>
-        private void ConvertMkvToMp4(string mkvPath, string? audioPath = null, string? audioLogPath = null, bool audioFailed = false)
+        private void ConvertMkvToMp4(string mkvPath, string? audioPath = null, string? audioLogPath = null, bool audioFailed = false, long audioBytesWritten = 0)
         {
             try
             {
@@ -1601,7 +1603,7 @@ namespace ExpressPackingMonitoring.ViewModels
                     });
                     return;
                 }
-                if (!ValidateAudioCaptureForMux(audioPath, audioLogPath))
+                if (!ValidateAudioCaptureForMux(audioPath, audioLogPath, audioBytesWritten))
                 {
                     Debug.WriteLine("[MkvToMp4] WAV 音频疑似提前静音，跳过 MP4 合成");
                     _ = Application.Current.Dispatcher.InvokeAsync(() =>
@@ -1748,11 +1750,11 @@ namespace ExpressPackingMonitoring.ViewModels
             }
         }
 
-        private bool ValidateAudioCaptureForMux(string? audioPath, string? audioLogPath)
+        private bool ValidateAudioCaptureForMux(string? audioPath, string? audioLogPath, long audioBytesWritten)
         {
             if (string.IsNullOrEmpty(audioPath) || !File.Exists(audioPath)) return true;
 
-            var summary = LogAudioCaptureSummary(audioPath, audioLogPath);
+            var summary = LogAudioCaptureSummary(audioPath, audioLogPath, audioBytesWritten);
             if (!summary.Checked) return true;
 
             if (!IsAudioTimelineUsable(summary.DurationSeconds, summary.LastActiveSecond, summary.ActiveWindowCount, out string reason))
@@ -1763,7 +1765,7 @@ namespace ExpressPackingMonitoring.ViewModels
             return true;
         }
 
-        private (bool Checked, double DurationSeconds, double LastActiveSecond, int ActiveWindowCount) LogAudioCaptureSummary(string? audioPath, string? audioLogPath)
+        private (bool Checked, double DurationSeconds, double LastActiveSecond, int ActiveWindowCount) LogAudioCaptureSummary(string? audioPath, string? audioLogPath, long audioBytesWritten)
         {
             if (string.IsNullOrEmpty(audioPath) || !File.Exists(audioPath))
                 return (false, 0, -1, 0);
@@ -1771,7 +1773,7 @@ namespace ExpressPackingMonitoring.ViewModels
             try
             {
                 using var reader = new WaveFileReader(audioPath);
-                string summary = $"WAV 时长={reader.TotalTime.TotalSeconds:F1}s 大小={new FileInfo(audioPath).Length} bytes 写入字节={_audioBytesWritten}";
+                string summary = $"WAV 时长={reader.TotalTime.TotalSeconds:F1}s 大小={new FileInfo(audioPath).Length} bytes 写入字节={audioBytesWritten}";
                 Debug.WriteLine($"[Audio] {summary}");
                 WriteAudioDiagnostic(summary, audioLogPath);
                 var timeline = LogAudioPeakTimeline(reader, audioLogPath);

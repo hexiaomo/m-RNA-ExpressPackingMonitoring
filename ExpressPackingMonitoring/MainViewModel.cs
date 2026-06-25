@@ -1613,6 +1613,7 @@ namespace ExpressPackingMonitoring.ViewModels
             string audioFileToConvert = null;
             string audioLogFileToUse = null;
             bool audioFailedForRecording = false;
+            long audioBytesWrittenForRecording = 0;
             long recordId = 0;
             DateTime recordStart = DateTime.MinValue;
 
@@ -1629,6 +1630,7 @@ namespace ExpressPackingMonitoring.ViewModels
                     _writeCts?.Cancel();
                     audioFileToConvert = StopAudioRecording();
                     audioFailedForRecording = _audioFailedForCurrentRecording;
+                    audioBytesWrittenForRecording = _audioBytesWritten;
                     _writeTask?.Wait(5000); // 等待写入线程关闭 stdin，让 FFmpeg 正常结束
 
                     // 如果 FFmpeg 还没退出，再等一会儿让它写完尾部
@@ -1658,7 +1660,7 @@ namespace ExpressPackingMonitoring.ViewModels
                     {
                         int durSec = Math.Max(1, (int)(DateTime.Now - recordStart).TotalSeconds);
                         _db?.UpdateVideoRecordOnStop(recordId, DateTime.Now, durSec, fileSize, _stopReason, _currentVideoCodec, _currentVideoEncoder);
-                        ConvertMkvToMp4(videoFileToConvert, audioFileToConvert, audioLogFileToUse, audioFailedForRecording);
+                        ConvertMkvToMp4(videoFileToConvert, audioFileToConvert, audioLogFileToUse, audioFailedForRecording, audioBytesWrittenForRecording);
                     }
                     else
                     {
