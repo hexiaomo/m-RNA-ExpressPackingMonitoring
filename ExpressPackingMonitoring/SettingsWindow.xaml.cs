@@ -724,6 +724,7 @@ namespace ExpressPackingMonitoring
                     EdgeTtsVoice = Config.EdgeTtsVoice,
                     EdgeTtsWarningVoice = Config.EdgeTtsWarningVoice,
                 };
+                _previewSpeechService.PlaybackError += OnPreviewSpeechError;
                 // 同步当前编辑中的断句关键词
                 var words = TtsBreakWordsTextBox.Text
                     .Split(new[] { '\r', '\n', '，', ',', ' ' }, StringSplitOptions.RemoveEmptyEntries)
@@ -755,6 +756,11 @@ namespace ExpressPackingMonitoring
         {
             _previewSpeechService?.Stop();
             TtsPreviewStatus.Text = "已停止";
+        }
+
+        private void OnPreviewSpeechError(string message)
+        {
+            Dispatcher.InvokeAsync(() => TtsPreviewStatus.Text = $"试听失败：{message}");
         }
 
         private CancellationTokenSource _migrationCts;

@@ -10,6 +10,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
 using EdgeTTS;
+using NAudio.Wave;
 using Windows.Media.SpeechSynthesis;
 using SherpaOnnx;
 
@@ -40,8 +41,8 @@ namespace ExpressPackingMonitoring.Services
         private Thread? _preGenThread;
         private readonly ManualResetEventSlim _speechProcessingGate = new(initialState: true);
         private readonly object _speechStateLock = new();
-        private readonly object _mciLock = new();
-        private string? _currentMciAlias;
+        private readonly object _filePlaybackLock = new();
+        private IWavePlayer? _currentFileWaveOut;
         private volatile bool _pauseForRecordingRequested;
 
         /// <summary>AI TTS 模型空闲多少分钟后自动卸载释放内存，0 = 不自动卸载</summary>
@@ -73,6 +74,7 @@ namespace ExpressPackingMonitoring.Services
         }
 
         public bool IsSpeechPaused => _pauseForRecordingRequested;
+        public event Action<string>? PlaybackError;
 
         public void PauseForRecording()
         {
@@ -366,6 +368,7 @@ namespace ExpressPackingMonitoring.Services
             catch (Exception ex)
             {
                 Debug.WriteLine($"[SpeechService] Immediate AI generation error: {ex.Message}");
+                PlaybackError?.Invoke(ex.Message);
                 return false;
             }
         }
@@ -409,39 +412,45 @@ namespace ExpressPackingMonitoring.Services
         {
             if (!File.Exists(path)) return;
 
-            string alias = "tts_" + Guid.NewGuid().ToString("N");
-            lock (_mciLock) _currentMciAlias = alias;
-
-            string escapedPath = path.Replace("\"", "\"\"");
+            WaveOutEvent? waveOut = null;
+            AudioFileReader? reader = null;
             try
             {
-                if (mciSendString($"open \"{escapedPath}\" alias {alias}", null, 0, IntPtr.Zero) != 0)
-                    return;
+                reader = new AudioFileReader(path);
+                waveOut = new WaveOutEvent();
+                waveOut.Init(reader);
 
-                if (mciSendString($"play {alias}", null, 0, IntPtr.Zero) != 0)
-                    return;
-
-                var status = new StringBuilder(32);
-                while (!_speechCancelRequested && !_isDisposed)
+                lock (_filePlaybackLock)
                 {
-                    status.Clear();
-                    mciSendString($"status {alias} mode", status, status.Capacity, IntPtr.Zero);
-                    if (string.Equals(status.ToString(), "stopped", StringComparison.OrdinalIgnoreCase))
-                        break;
+                    _currentFileWaveOut?.Stop();
+                    _currentFileWaveOut?.Dispose();
+                    _currentFileWaveOut = waveOut;
+                }
+
+                waveOut.Play();
+                while (waveOut.PlaybackState == PlaybackState.Playing && !_speechCancelRequested && !_isDisposed)
+                {
                     Thread.Sleep(20);
                 }
 
                 if (_speechCancelRequested || _isDisposed)
-                    mciSendString($"stop {alias}", null, 0, IntPtr.Zero);
+                    waveOut.Stop();
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[SpeechService] Audio file playback error: {ex.Message}");
+                PlaybackError?.Invoke(ex.Message);
             }
             finally
             {
-                mciSendString($"close {alias}", null, 0, IntPtr.Zero);
-                lock (_mciLock)
+                lock (_filePlaybackLock)
                 {
-                    if (_currentMciAlias == alias)
-                        _currentMciAlias = null;
+                    if (ReferenceEquals(_currentFileWaveOut, waveOut))
+                        _currentFileWaveOut = null;
                 }
+
+                try { waveOut?.Dispose(); } catch { }
+                try { reader?.Dispose(); } catch { }
             }
         }
         #region TTS 磁盘缓存
@@ -926,10 +935,9 @@ namespace ExpressPackingMonitoring.Services
         public void Stop()
         {
             _speechCancelRequested = true;
-            lock (_mciLock)
+            lock (_filePlaybackLock)
             {
-                if (!string.IsNullOrEmpty(_currentMciAlias))
-                    mciSendString($"stop {_currentMciAlias}", null, 0, IntPtr.Zero);
+                try { _currentFileWaveOut?.Stop(); } catch { }
             }
             while (_speechQueue != null && _speechQueue.TryTake(out _)) { }
         }
@@ -976,9 +984,6 @@ namespace ExpressPackingMonitoring.Services
         private static extern int waveOutReset(IntPtr hwo);
         [DllImport("winmm.dll")]
         private static extern int waveOutClose(IntPtr hwo);
-        [DllImport("winmm.dll", CharSet = CharSet.Unicode)]
-        private static extern int mciSendString(string command, StringBuilder? returnValue, int returnLength, IntPtr winHandle);
-
         private const uint WAVE_MAPPER = 0xFFFFFFFF;
         private const uint CALLBACK_NULL = 0x00000000;
         private const int WHDR_DONE = 0x00000001;
