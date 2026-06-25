@@ -32,6 +32,7 @@ namespace ExpressPackingMonitoring.ViewModels
             BlockingCollection<Mat> oldQueue;
             Task oldWriteTask;
             string? audioFilePath;
+            bool audioFailedForThisRecording;
 
             lock (_videoLock)
             {
@@ -47,6 +48,7 @@ namespace ExpressPackingMonitoring.ViewModels
             try { oldQueue?.CompleteAdding(); } catch { }
             oldCts?.Cancel(); // 3. 通知 FFmpeg 线程停止
             audioFilePath = StopAudioRecording();
+            audioFailedForThisRecording = _audioFailedForCurrentRecording;
 
             // 4. 等待录制线程真正退出（FFmpeg 进程关闭）
             try
@@ -140,7 +142,7 @@ namespace ExpressPackingMonitoring.ViewModels
                         _db?.UpdateVideoRecordOnStop(recordId, DateTime.Now, durSec, fileSize, stopReason, videoCodec, videoEncoder);
 
                         // 自动将 MKV 转换为 MP4（无损容器转换）
-                        ConvertMkvToMp4(filePath, audioFilePath, audioLogPath);
+                        ConvertMkvToMp4(filePath, audioFilePath, audioLogPath, audioFailedForThisRecording);
 
                         _ = Application.Current.Dispatcher.InvokeAsync(() => {
                             if (!_isDisposed && scanRecord != null)
@@ -1574,7 +1576,7 @@ namespace ExpressPackingMonitoring.ViewModels
         /// <summary>
         /// 录制完成后自动将 MKV 无损转换为 MP4（容器转换，不重新编码）
         /// </summary>
-        private void ConvertMkvToMp4(string mkvPath, string? audioPath = null, string? audioLogPath = null)
+        private void ConvertMkvToMp4(string mkvPath, string? audioPath = null, string? audioLogPath = null, bool audioFailed = false)
         {
             try
             {
@@ -1589,7 +1591,7 @@ namespace ExpressPackingMonitoring.ViewModels
                 }
 
                 string mp4Path = Path.ChangeExtension(mkvPath, ".mp4");
-                if (_audioFailedForCurrentRecording)
+                if (audioFailed)
                 {
                     WriteAudioDiagnostic($"音频录制失败，已保留 MKV: mkv={mkvPath}", audioLogPath);
                     _ = Application.Current.Dispatcher.InvokeAsync(() =>
