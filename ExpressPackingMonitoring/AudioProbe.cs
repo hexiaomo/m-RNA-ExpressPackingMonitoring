@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Linq;
+using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using System.Threading;
@@ -48,7 +49,9 @@ namespace ExpressPackingMonitoring
             var devices = enumerator.EnumerateAudioEndPoints(DataFlow.Capture, DeviceState.Active);
             using var device = ResolveAudioEndpoint(config, devices);
             string wavPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "audio_probe.wav");
+            string mp4Path = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "audio_probe.mp4");
             try { if (File.Exists(wavPath)) File.Delete(wavPath); } catch { }
+            try { if (File.Exists(mp4Path)) File.Delete(mp4Path); } catch { }
 
             var log = new StringBuilder();
             log.AppendLine($"Audio probe started: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
@@ -106,12 +109,14 @@ namespace ExpressPackingMonitoring
             writer.Dispose();
 
             var wavInfo = ReadWavInfo(wavPath);
+            var mp4Info = ProbeMp4Mux(wavPath, mp4Path, seconds);
             bool ok = stoppedException == null
                 && packets > 0
                 && bytes > 0
                 && gapCount == 0
                 && wavInfo.Valid
-                && wavInfo.DurationSeconds >= seconds * 0.8;
+                && wavInfo.DurationSeconds >= seconds * 0.8
+                && mp4Info.Valid;
             log.AppendLine($"Packets={packets}");
             log.AppendLine($"Bytes={bytes}");
             log.AppendLine($"Peak={peak}");
@@ -121,10 +126,83 @@ namespace ExpressPackingMonitoring
             log.AppendLine($"WavBytes={wavInfo.FileBytes}");
             log.AppendLine($"WavDurationSeconds={wavInfo.DurationSeconds:F2}");
             log.AppendLine($"WavError={wavInfo.Error ?? "(none)"}");
+            log.AppendLine($"Mp4Path={mp4Path}");
+            log.AppendLine($"Mp4Valid={mp4Info.Valid}");
+            log.AppendLine($"Mp4Bytes={mp4Info.FileBytes}");
+            log.AppendLine($"Mp4AudioDecodeOk={mp4Info.AudioDecodeOk}");
+            log.AppendLine($"Mp4Error={mp4Info.Error ?? "(none)"}");
             log.AppendLine($"StoppedException={stoppedException?.Message ?? "(none)"}");
             log.AppendLine($"Result={(ok ? "OK" : "FAILED")}");
             File.WriteAllText(logPath, log.ToString(), Encoding.UTF8);
             return ok;
+        }
+
+        private static (bool Valid, long FileBytes, bool AudioDecodeOk, string? Error) ProbeMp4Mux(string wavPath, string mp4Path, int seconds)
+        {
+            string? ffmpegPath = FindFFmpeg();
+            if (string.IsNullOrEmpty(ffmpegPath))
+                return (false, 0, false, "ffmpeg.exe not found.");
+
+            string muxArgs = $"-y -f lavfi -i \"testsrc2=size=320x180:rate=10:duration={seconds}\" -i \"{wavPath}\" -map 0:v:0 -map 1:a:0 -c:v libx264 -preset ultrafast -crf 35 -c:a aac -b:a 128k -shortest \"{mp4Path}\"";
+            var mux = RunProcess(ffmpegPath, muxArgs, Math.Max(15000, seconds * 3000));
+            if (!mux.Exited || mux.ExitCode != 0 || !File.Exists(mp4Path) || new FileInfo(mp4Path).Length <= 0)
+                return (false, File.Exists(mp4Path) ? new FileInfo(mp4Path).Length : 0, false, $"Mux failed: exited={mux.Exited}, exitCode={mux.ExitCode}, stderr={TrimForLog(mux.Stderr)}");
+
+            string decodeArgs = $"-v error -i \"{mp4Path}\" -map 0:a:0 -f null NUL";
+            var decode = RunProcess(ffmpegPath, decodeArgs, Math.Max(15000, seconds * 3000));
+            bool decodeOk = decode.Exited && decode.ExitCode == 0;
+            string? error = decodeOk ? null : $"Audio decode failed: exited={decode.Exited}, exitCode={decode.ExitCode}, stderr={TrimForLog(decode.Stderr)}";
+            return (decodeOk, new FileInfo(mp4Path).Length, decodeOk, error);
+        }
+
+        private static string? FindFFmpeg()
+        {
+            string local = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ffmpeg.exe");
+            if (File.Exists(local)) return local;
+
+            string projectLocal = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "..", "..", "ffmpeg.exe");
+            string fullProjectLocal = Path.GetFullPath(projectLocal);
+            if (File.Exists(fullProjectLocal)) return fullProjectLocal;
+
+            return null;
+        }
+
+        private static (bool Exited, int ExitCode, string Stderr) RunProcess(string fileName, string arguments, int timeoutMs)
+        {
+            var psi = new ProcessStartInfo
+            {
+                FileName = fileName,
+                Arguments = arguments,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardError = true,
+                RedirectStandardOutput = true
+            };
+
+            using var process = Process.Start(psi);
+            if (process == null)
+                return (false, -1, "Process failed to start.");
+
+            string stderr = string.Empty;
+            var stderrTask = process.StandardError.ReadToEndAsync();
+            var stdoutTask = process.StandardOutput.ReadToEndAsync();
+            bool exited = process.WaitForExit(timeoutMs);
+            if (!exited)
+            {
+                try { process.Kill(); } catch { }
+                try { process.WaitForExit(3000); } catch { }
+            }
+
+            try { stderr = stderrTask.GetAwaiter().GetResult(); } catch { }
+            try { _ = stdoutTask.GetAwaiter().GetResult(); } catch { }
+            return (exited, exited ? process.ExitCode : -1, stderr);
+        }
+
+        private static string TrimForLog(string text)
+        {
+            if (string.IsNullOrWhiteSpace(text)) return string.Empty;
+            text = text.Replace("\r", " ").Replace("\n", " ").Trim();
+            return text.Length <= 500 ? text : text[..500];
         }
 
         private static (bool Valid, long FileBytes, double DurationSeconds, string? Error) ReadWavInfo(string wavPath)
