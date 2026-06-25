@@ -71,6 +71,9 @@ namespace ExpressPackingMonitoring.ViewModels
         private int _silentAudioCheckCount;
         private int _audioConvertFailureCount;
         private int _audioSelectedSourceChannel = -1;
+        private double _audioResamplePosition;
+        private short _audioPreviousSourceSample;
+        private bool _audioHasPreviousSourceSample;
 
         private Mat _previousCheckFrame = new Mat();
         private BitmapSource _videoFrame;

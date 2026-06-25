@@ -751,6 +751,9 @@ namespace ExpressPackingMonitoring.ViewModels
                     _silentAudioCheckCount = 0;
                     _audioConvertFailureCount = 0;
                     _audioSelectedSourceChannel = -1;
+                    _audioResamplePosition = 0;
+                    _audioPreviousSourceSample = 0;
+                    _audioHasPreviousSourceSample = false;
                     _audioWriteFailed = false;
                     _audioMonitorCts = new CancellationTokenSource();
                 }
@@ -872,7 +875,15 @@ namespace ExpressPackingMonitoring.ViewModels
                     var now = DateTime.Now;
                     _lastAudioPacketAt = now;
                     int selectedChannel = _audioSelectedSourceChannel;
-                    byte[]? pcmBytes = ConvertCaptureBufferToPcm16(e.Buffer, e.BytesRecorded, capture.WaveFormat, _audioWriter.WaveFormat, ref selectedChannel);
+                    byte[]? pcmBytes = ConvertCaptureBufferToPcm16(
+                        e.Buffer,
+                        e.BytesRecorded,
+                        capture.WaveFormat,
+                        _audioWriter.WaveFormat,
+                        ref selectedChannel,
+                        ref _audioResamplePosition,
+                        ref _audioPreviousSourceSample,
+                        ref _audioHasPreviousSourceSample);
                     if (pcmBytes == null || pcmBytes.Length == 0)
                     {
                         _audioConvertFailureCount++;
@@ -1000,11 +1011,18 @@ namespace ExpressPackingMonitoring.ViewModels
 
         private static WaveFormat CreatePcm16WaveFormat(WaveFormat sourceFormat)
         {
-            int sampleRate = Math.Max(8000, sourceFormat.SampleRate);
-            return new WaveFormat(sampleRate, 16, 1);
+            return new WaveFormat(48000, 16, 1);
         }
 
-        private static byte[]? ConvertCaptureBufferToPcm16(byte[] buffer, int bytesRecorded, WaveFormat sourceFormat, WaveFormat targetFormat, ref int selectedSourceChannel)
+        private static byte[]? ConvertCaptureBufferToPcm16(
+            byte[] buffer,
+            int bytesRecorded,
+            WaveFormat sourceFormat,
+            WaveFormat targetFormat,
+            ref int selectedSourceChannel,
+            ref double resamplePosition,
+            ref short previousSourceSample,
+            ref bool hasPreviousSourceSample)
         {
             if (bytesRecorded <= 0) return Array.Empty<byte>();
 
@@ -1028,17 +1046,75 @@ namespace ExpressPackingMonitoring.ViewModels
             if (selectedChannel != selectedSourceChannel)
                 selectedSourceChannel = selectedChannel;
 
-            byte[] output = new byte[frames * targetChannels * 2];
-            int outOffset = 0;
+            short[] monoSamples = new short[frames];
             for (int frame = 0; frame < frames; frame++)
             {
                 int frameOffset = frame * blockAlign;
                 int sampleOffset = frameOffset + selectedChannel * bytesPerSample;
-                short monoSample = isFloat
+                monoSamples[frame] = isFloat
                     ? ReadFloatSampleAsPcm16(buffer, sampleOffset, bytesPerSample)
                     : ReadPcmSampleAsPcm16(buffer, sampleOffset, bytesPerSample);
-                output[outOffset++] = (byte)(monoSample & 0xff);
-                output[outOffset++] = (byte)((monoSample >> 8) & 0xff);
+            }
+            return ResampleMonoPcm16ToBytes(monoSamples, sourceFormat.SampleRate, targetFormat.SampleRate, ref resamplePosition, ref previousSourceSample, ref hasPreviousSourceSample);
+        }
+
+        private static byte[] ResampleMonoPcm16ToBytes(
+            short[] sourceSamples,
+            int sourceSampleRate,
+            int targetSampleRate,
+            ref double resamplePosition,
+            ref short previousSourceSample,
+            ref bool hasPreviousSourceSample)
+        {
+            if (sourceSamples.Length == 0) return Array.Empty<byte>();
+
+            if (sourceSampleRate == targetSampleRate)
+            {
+                previousSourceSample = sourceSamples[^1];
+                hasPreviousSourceSample = true;
+                return Pcm16SamplesToBytes(sourceSamples);
+            }
+
+            int prefix = hasPreviousSourceSample ? 1 : 0;
+            short[] samples = new short[sourceSamples.Length + prefix];
+            if (hasPreviousSourceSample)
+                samples[0] = previousSourceSample;
+            Array.Copy(sourceSamples, 0, samples, prefix, sourceSamples.Length);
+
+            if (samples.Length < 2)
+            {
+                previousSourceSample = samples[^1];
+                hasPreviousSourceSample = true;
+                return Array.Empty<byte>();
+            }
+
+            double step = (double)sourceSampleRate / targetSampleRate;
+            var output = new List<short>(Math.Max(1, (int)(sourceSamples.Length / step) + 2));
+            while (resamplePosition + 1 < samples.Length)
+            {
+                int index = (int)resamplePosition;
+                double fraction = resamplePosition - index;
+                double sample = samples[index] + (samples[index + 1] - samples[index]) * fraction;
+                output.Add((short)Math.Clamp((int)Math.Round(sample), short.MinValue, short.MaxValue));
+                resamplePosition += step;
+            }
+
+            resamplePosition -= samples.Length - 1;
+            if (resamplePosition < 0) resamplePosition = 0;
+            previousSourceSample = sourceSamples[^1];
+            hasPreviousSourceSample = true;
+            return Pcm16SamplesToBytes(output);
+        }
+
+        private static byte[] Pcm16SamplesToBytes(IReadOnlyList<short> samples)
+        {
+            byte[] output = new byte[samples.Count * 2];
+            int outOffset = 0;
+            for (int i = 0; i < samples.Count; i++)
+            {
+                short sample = samples[i];
+                output[outOffset++] = (byte)(sample & 0xff);
+                output[outOffset++] = (byte)((sample >> 8) & 0xff);
             }
             return output;
         }
@@ -1295,6 +1371,9 @@ namespace ExpressPackingMonitoring.ViewModels
                     _audioBytesSinceLastCheck = 0;
                     _silentAudioCheckCount = 0;
                     _audioConvertFailureCount = 0;
+                    _audioResamplePosition = 0;
+                    _audioPreviousSourceSample = 0;
+                    _audioHasPreviousSourceSample = false;
                 }
 
                 capture.StartRecording();
