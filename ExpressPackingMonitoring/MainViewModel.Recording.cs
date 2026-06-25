@@ -1045,7 +1045,13 @@ namespace ExpressPackingMonitoring.ViewModels
                 process.StandardError.ReadToEnd();
                 process.WaitForExit();
 
-                if (process.ExitCode == 0 && File.Exists(mp4Path) && new FileInfo(mp4Path).Length > 0)
+                bool hasExternalAudio = !string.IsNullOrEmpty(audioPath) && File.Exists(audioPath);
+                bool convertedOk = process.ExitCode == 0
+                    && File.Exists(mp4Path)
+                    && new FileInfo(mp4Path).Length > 0
+                    && ValidateConvertedMp4(ffmpegPath, mp4Path, hasExternalAudio);
+
+                if (convertedOk)
                 {
                     // 转换成功，删除原始 MKV
                     try { File.Delete(mkvPath); } catch { }
@@ -1091,6 +1097,52 @@ namespace ExpressPackingMonitoring.ViewModels
             }
 
             return $"-y -i \"{mkvPath}\" -i \"{audioPath}\"{filter} -map 0:v:0 -map \"{audioMap}\" -c:v copy -c:a aac -b:a 128k -shortest \"{mp4Path}\"";
+        }
+
+        private bool ValidateConvertedMp4(string ffmpegPath, string mp4Path, bool requireAudio)
+        {
+            if (!File.Exists(mp4Path)) return false;
+            if (!requireAudio) return true;
+
+            try
+            {
+                var psi = new ProcessStartInfo
+                {
+                    FileName = ffmpegPath,
+                    Arguments = $"-v error -i \"{mp4Path}\" -map 0:a:0 -t 1 -f null NUL",
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    RedirectStandardError = true,
+                    RedirectStandardOutput = true
+                };
+
+                using var process = Process.Start(psi);
+                if (process == null)
+                {
+                    Debug.WriteLine("[MkvToMp4] 音轨校验进程启动失败");
+                    return false;
+                }
+
+                string stderr = process.StandardError.ReadToEnd();
+                bool exited = process.WaitForExit(10000);
+
+                if (!exited)
+                {
+                    try { process.Kill(); } catch { }
+                    Debug.WriteLine("[MkvToMp4] 音轨校验超时");
+                    return false;
+                }
+
+                bool ok = process.ExitCode == 0;
+                if (!ok)
+                    Debug.WriteLine($"[MkvToMp4] 音轨校验失败: {stderr}");
+                return ok;
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[MkvToMp4] 音轨校验异常: {ex.Message}");
+                return false;
+            }
         }
 
         private void LogAudioCaptureSummary(string? audioPath)
