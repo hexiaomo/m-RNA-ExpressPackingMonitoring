@@ -1115,12 +1115,12 @@ namespace ExpressPackingMonitoring.ViewModels
             _audioBytesSinceLastCheck += bytesRecorded;
         }
 
-        private static WaveFormat CreatePcm16WaveFormat(WaveFormat sourceFormat)
+        internal static WaveFormat CreatePcm16WaveFormat(WaveFormat sourceFormat)
         {
             return new WaveFormat(48000, 16, 1);
         }
 
-        private static byte[]? ConvertCaptureBufferToPcm16(
+        internal static byte[]? ConvertCaptureBufferToPcm16(
             byte[] buffer,
             int bytesRecorded,
             WaveFormat sourceFormat,
@@ -1212,7 +1212,7 @@ namespace ExpressPackingMonitoring.ViewModels
             return Pcm16SamplesToBytes(output);
         }
 
-        private static byte[]? FlushResamplerTail(short previousSourceSample, bool hasPreviousSourceSample, ref double resamplePosition)
+        internal static byte[]? FlushResamplerTail(short previousSourceSample, bool hasPreviousSourceSample, ref double resamplePosition)
         {
             if (!hasPreviousSourceSample || resamplePosition <= 0) return null;
 
@@ -1328,7 +1328,7 @@ namespace ExpressPackingMonitoring.ViewModels
             return value;
         }
 
-        private static bool TryGetAudioPeak(byte[] buffer, int bytesRecorded, WaveFormat format, out short peak)
+        internal static bool TryGetAudioPeak(byte[] buffer, int bytesRecorded, WaveFormat format, out short peak)
         {
             peak = 0;
 

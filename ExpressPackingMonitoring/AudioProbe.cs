@@ -62,18 +62,25 @@ namespace ExpressPackingMonitoring
             log.AppendLine($"SelectedEndpoint={device.ID}");
 
             int packets = 0;
+            long rawBytes = 0;
             long bytes = 0;
             short peak = 0;
             int gapCount = 0;
             double maxGapMs = 0;
+            int selectedChannel = -1;
+            double resamplePosition = 0;
+            short previousSourceSample = 0;
+            bool hasPreviousSourceSample = false;
             DateTime lastPacketAt = DateTime.MinValue;
             using var capture = new WasapiCapture(device, true, 100)
             {
                 ShareMode = AudioClientShareMode.Shared
             };
-            var writer = new WaveFileWriter(wavPath, capture.WaveFormat);
+            var writerFormat = MainViewModel.CreatePcm16WaveFormat(capture.WaveFormat);
+            var writer = new WaveFileWriter(wavPath, writerFormat);
 
             log.AppendLine($"SourceFormat={capture.WaveFormat}");
+            log.AppendLine($"WavFormat={writerFormat}");
             log.AppendLine("WasapiEventSync=true");
             log.AppendLine("BufferMs=100");
             log.AppendLine($"WavPath={wavPath}");
@@ -93,9 +100,22 @@ namespace ExpressPackingMonitoring
 
                 lastPacketAt = now;
                 packets++;
-                bytes += e.BytesRecorded;
-                writer.Write(e.Buffer, 0, e.BytesRecorded);
-                if (TryGetPeak(e.Buffer, e.BytesRecorded, capture.WaveFormat, out short packetPeak) && packetPeak > peak)
+                rawBytes += e.BytesRecorded;
+                byte[]? pcmBytes = MainViewModel.ConvertCaptureBufferToPcm16(
+                    e.Buffer,
+                    e.BytesRecorded,
+                    capture.WaveFormat,
+                    writerFormat,
+                    ref selectedChannel,
+                    ref resamplePosition,
+                    ref previousSourceSample,
+                    ref hasPreviousSourceSample);
+                if (pcmBytes == null || pcmBytes.Length == 0)
+                    return;
+
+                bytes += pcmBytes.Length;
+                writer.Write(pcmBytes, 0, pcmBytes.Length);
+                if (MainViewModel.TryGetAudioPeak(pcmBytes, pcmBytes.Length, writerFormat, out short packetPeak) && packetPeak > peak)
                     peak = packetPeak;
             };
 
@@ -105,6 +125,12 @@ namespace ExpressPackingMonitoring
             capture.StartRecording();
             Thread.Sleep(TimeSpan.FromSeconds(seconds));
             capture.StopRecording();
+            byte[]? tailBytes = MainViewModel.FlushResamplerTail(previousSourceSample, hasPreviousSourceSample, ref resamplePosition);
+            if (tailBytes != null && tailBytes.Length > 0)
+            {
+                bytes += tailBytes.Length;
+                writer.Write(tailBytes, 0, tailBytes.Length);
+            }
             writer.Flush();
             writer.Dispose();
 
@@ -118,8 +144,10 @@ namespace ExpressPackingMonitoring
                 && wavInfo.DurationSeconds >= seconds * 0.8
                 && mp4Info.Valid;
             log.AppendLine($"Packets={packets}");
+            log.AppendLine($"RawBytes={rawBytes}");
             log.AppendLine($"Bytes={bytes}");
             log.AppendLine($"Peak={peak}");
+            log.AppendLine($"SelectedChannel={selectedChannel}");
             log.AppendLine($"GapCount={gapCount}");
             log.AppendLine($"MaxGapMs={maxGapMs:F0}");
             log.AppendLine($"WavValid={wavInfo.Valid}");
@@ -277,53 +305,5 @@ namespace ExpressPackingMonitoring
                 || configuredName.Contains(endpointName, StringComparison.OrdinalIgnoreCase);
         }
 
-        private static bool TryGetPeak(byte[] buffer, int bytesRecorded, WaveFormat format, out short peak)
-        {
-            peak = 0;
-            bool isFloat = format.Encoding == WaveFormatEncoding.IeeeFloat
-                || (format.Encoding == WaveFormatEncoding.Extensible
-                    && format is WaveFormatExtensible floatExtensible
-                    && floatExtensible.SubFormat == new Guid("00000003-0000-0010-8000-00aa00389b71"));
-            bool isPcm = format.Encoding == WaveFormatEncoding.Pcm
-                || (format.Encoding == WaveFormatEncoding.Extensible
-                    && format is WaveFormatExtensible pcmExtensible
-                    && pcmExtensible.SubFormat == new Guid("00000001-0000-0010-8000-00aa00389b71"));
-
-            if (isFloat && format.BitsPerSample == 32)
-            {
-                for (int i = 0; i + 3 < bytesRecorded; i += 4)
-                {
-                    float sample = BitConverter.ToSingle(buffer, i);
-                    int scaled = (int)Math.Clamp(Math.Abs(sample) * short.MaxValue, 0, short.MaxValue);
-                    if (scaled > peak) peak = (short)scaled;
-                }
-                return true;
-            }
-
-            if (!isPcm) return false;
-            int bytesPerSample = Math.Max(1, format.BitsPerSample / 8);
-            for (int i = 0; i + bytesPerSample - 1 < bytesRecorded; i += bytesPerSample)
-            {
-                short sample = bytesPerSample switch
-                {
-                    1 => (short)((buffer[i] - 128) << 8),
-                    2 => BitConverter.ToInt16(buffer, i),
-                    3 => (short)(ReadInt24(buffer, i) >> 8),
-                    4 => (short)(BitConverter.ToInt32(buffer, i) >> 16),
-                    _ => 0
-                };
-                short abs = sample == short.MinValue ? short.MaxValue : (short)Math.Abs(sample);
-                if (abs > peak) peak = abs;
-            }
-            return true;
-        }
-
-        private static int ReadInt24(byte[] buffer, int offset)
-        {
-            int value = buffer[offset] | (buffer[offset + 1] << 8) | (buffer[offset + 2] << 16);
-            if ((value & 0x800000) != 0)
-                value |= unchecked((int)0xff000000);
-            return value;
-        }
     }
 }
