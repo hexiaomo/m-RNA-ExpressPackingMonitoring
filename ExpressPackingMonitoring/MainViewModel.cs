@@ -55,6 +55,7 @@ namespace ExpressPackingMonitoring.ViewModels
         private NAudio.Wave.WaveFileWriter _audioWriter;
         private BlockingCollection<byte[]> _audioWriteQueue;
         private Task _audioFileWriteTask;
+        private bool _audioWriteFailed;
         private string _currentAudioFilePath;
         private string _currentAudioLogPath;
         private CancellationTokenSource _audioMonitorCts;

@@ -750,6 +750,7 @@ namespace ExpressPackingMonitoring.ViewModels
                     _silentAudioCheckCount = 0;
                     _audioConvertFailureCount = 0;
                     _audioSelectedSourceChannel = -1;
+                    _audioWriteFailed = false;
                     _audioMonitorCts = new CancellationTokenSource();
                 }
 
@@ -775,6 +776,7 @@ namespace ExpressPackingMonitoring.ViewModels
             WaveFileWriter? writer;
             BlockingCollection<byte[]>? writeQueue;
             Task? writeTask;
+            bool writeFailed;
             string? audioFilePath;
             CancellationTokenSource? monitorCts;
             Task? monitorTask;
@@ -786,6 +788,7 @@ namespace ExpressPackingMonitoring.ViewModels
                 writer = _audioWriter;
                 writeQueue = _audioWriteQueue;
                 writeTask = _audioFileWriteTask;
+                writeFailed = _audioWriteFailed;
                 audioFilePath = _currentAudioFilePath;
                 monitorCts = _audioMonitorCts;
                 monitorTask = _audioMonitorTask;
@@ -806,7 +809,21 @@ namespace ExpressPackingMonitoring.ViewModels
             try { monitorCts?.Dispose(); } catch { }
             try { writeQueue?.CompleteAdding(); } catch { }
 
-            try { writeTask?.Wait(5000); } catch { }
+            bool writeCompleted = true;
+            try
+            {
+                if (writeTask != null)
+                    writeCompleted = writeTask.Wait(5000);
+            }
+            catch
+            {
+                writeCompleted = false;
+            }
+            if (!writeCompleted)
+            {
+                writeFailed = true;
+                WriteAudioDiagnostic("WAV 写入超时，放弃本次音频");
+            }
             if (writeTask == null)
             {
                 try { writer?.Flush(); } catch { }
@@ -814,7 +831,18 @@ namespace ExpressPackingMonitoring.ViewModels
             }
             try { writeQueue?.Dispose(); } catch { }
 
+            lock (_audioLock)
+            {
+                writeFailed = writeFailed || _audioWriteFailed;
+            }
+
             if (string.IsNullOrEmpty(audioFilePath)) return null;
+
+            if (writeFailed)
+            {
+                DeleteAudioTempFile(audioFilePath);
+                return null;
+            }
 
             try
             {
@@ -918,8 +946,16 @@ namespace ExpressPackingMonitoring.ViewModels
 
         private void EnqueueAudioBytes(byte[] bytes)
         {
-            if (_audioWriteQueue == null || _audioWriteQueue.IsAddingCompleted || bytes.Length == 0) return;
-            _audioWriteQueue.Add(bytes);
+            if (_audioWriteFailed || _audioWriteQueue == null || _audioWriteQueue.IsAddingCompleted || bytes.Length == 0) return;
+            try
+            {
+                if (!_audioWriteQueue.TryAdd(bytes))
+                    _audioWriteFailed = true;
+            }
+            catch
+            {
+                _audioWriteFailed = true;
+            }
         }
 
         private void AudioFileWriteLoop(WaveFileWriter writer, BlockingCollection<byte[]> queue)
@@ -932,6 +968,10 @@ namespace ExpressPackingMonitoring.ViewModels
             catch (Exception ex)
             {
                 Debug.WriteLine($"[Audio] WAV 写入异常: {ex.Message}");
+                lock (_audioLock)
+                {
+                    _audioWriteFailed = true;
+                }
                 WriteAudioDiagnostic($"WAV 写入异常: {ex.Message}");
             }
             finally
