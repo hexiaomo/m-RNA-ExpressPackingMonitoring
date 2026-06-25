@@ -932,8 +932,7 @@ namespace ExpressPackingMonitoring.ViewModels
                             Array.Clear(pcmBytes, 0, pcmBytes.Length);
                         PadAudioGapIfNeeded(now);
                         UpdateAudioLevelStats(pcmBytes, pcmBytes.Length, _audioWriter.WaveFormat);
-                        EnqueueAudioBytes(pcmBytes);
-                        _audioBytesWritten += pcmBytes.Length;
+                        _audioBytesWritten += EnqueueAudioBytes(pcmBytes);
                         _lastAudioDataAt = DateTime.Now;
                     }
                 }
@@ -975,31 +974,35 @@ namespace ExpressPackingMonitoring.ViewModels
                 int chunk = Math.Min(remaining, silence.Length);
                 if (chunk == silence.Length)
                 {
-                    EnqueueAudioBytes(silence);
+                    _audioBytesWritten += EnqueueAudioBytes(silence);
                 }
                 else
                 {
                     byte[] partialSilence = new byte[chunk];
-                    EnqueueAudioBytes(partialSilence);
+                    _audioBytesWritten += EnqueueAudioBytes(partialSilence);
                 }
                 remaining -= chunk;
             }
-            _audioBytesWritten += silenceBytes;
             Debug.WriteLine($"[Audio] 补齐录音间隙: {gapMs:F0}ms");
             WriteAudioDiagnostic($"补齐录音间隙: {gapMs:F0}ms, silenceBytes={silenceBytes}");
         }
 
-        private void EnqueueAudioBytes(byte[] bytes)
+        private int EnqueueAudioBytes(byte[] bytes)
         {
-            if (_audioWriteFailed || _audioWriteQueue == null || _audioWriteQueue.IsAddingCompleted || bytes.Length == 0) return;
+            if (_audioWriteFailed || _audioWriteQueue == null || _audioWriteQueue.IsAddingCompleted || bytes.Length == 0) return 0;
             try
             {
                 if (!_audioWriteQueue.TryAdd(bytes))
+                {
                     _audioWriteFailed = true;
+                    return 0;
+                }
+                return bytes.Length;
             }
             catch
             {
                 _audioWriteFailed = true;
+                return 0;
             }
         }
 
