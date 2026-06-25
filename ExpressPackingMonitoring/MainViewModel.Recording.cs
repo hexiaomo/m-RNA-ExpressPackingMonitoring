@@ -743,6 +743,7 @@ namespace ExpressPackingMonitoring.ViewModels
                     _audioPeakSinceLastCheck = 0;
                     _audioBytesSinceLastCheck = 0;
                     _silentAudioCheckCount = 0;
+                    _audioSelectedSourceChannel = -1;
                     _audioMonitorCts = new CancellationTokenSource();
                 }
 
@@ -822,11 +823,17 @@ namespace ExpressPackingMonitoring.ViewModels
                 lock (_audioLock)
                 {
                     if (_audioWriter == null || e.BytesRecorded <= 0) return;
-                    byte[]? pcmBytes = ConvertCaptureBufferToPcm16(e.Buffer, e.BytesRecorded, capture.WaveFormat, _audioWriter.WaveFormat);
+                    int selectedChannel = _audioSelectedSourceChannel;
+                    byte[]? pcmBytes = ConvertCaptureBufferToPcm16(e.Buffer, e.BytesRecorded, capture.WaveFormat, _audioWriter.WaveFormat, ref selectedChannel);
                     if (pcmBytes == null || pcmBytes.Length == 0)
                     {
                         WriteAudioDiagnostic($"麦克风格式暂不支持转换: format={capture.WaveFormat}, bytes={e.BytesRecorded}");
                         return;
+                    }
+                    if (selectedChannel != _audioSelectedSourceChannel)
+                    {
+                        _audioSelectedSourceChannel = selectedChannel;
+                        WriteAudioDiagnostic($"麦克风输入通道已锁定: channel={selectedChannel}, sourceChannels={capture.WaveFormat.Channels}");
                     }
                     PadAudioGapIfNeeded(DateTime.Now);
                     UpdateAudioLevelStats(pcmBytes, pcmBytes.Length, _audioWriter.WaveFormat);
@@ -896,7 +903,7 @@ namespace ExpressPackingMonitoring.ViewModels
             return new WaveFormat(sampleRate, 16, 1);
         }
 
-        private static byte[]? ConvertCaptureBufferToPcm16(byte[] buffer, int bytesRecorded, WaveFormat sourceFormat, WaveFormat targetFormat)
+        private static byte[]? ConvertCaptureBufferToPcm16(byte[] buffer, int bytesRecorded, WaveFormat sourceFormat, WaveFormat targetFormat, ref int selectedSourceChannel)
         {
             if (bytesRecorded <= 0) return Array.Empty<byte>();
 
@@ -916,7 +923,18 @@ namespace ExpressPackingMonitoring.ViewModels
             bool isPcm = IsPcmWaveFormat(sourceFormat);
             if (!isFloat && !isPcm) return null;
 
-            int selectedChannel = SelectStrongestAudioChannel(buffer, frames, sourceChannels, blockAlign, bytesPerSample, isFloat);
+            int selectedChannel;
+            if (selectedSourceChannel >= 0 && selectedSourceChannel < sourceChannels)
+            {
+                selectedChannel = selectedSourceChannel;
+            }
+            else
+            {
+                selectedChannel = SelectStrongestAudioChannel(buffer, frames, sourceChannels, blockAlign, bytesPerSample, isFloat, out bool shouldLockChannel);
+                if (shouldLockChannel)
+                    selectedSourceChannel = selectedChannel;
+            }
+
             byte[] output = new byte[frames * targetChannels * 2];
             int outOffset = 0;
             for (int frame = 0; frame < frames; frame++)
@@ -932,9 +950,14 @@ namespace ExpressPackingMonitoring.ViewModels
             return output;
         }
 
-        private static int SelectStrongestAudioChannel(byte[] buffer, int frames, int channels, int blockAlign, int bytesPerSample, bool isFloat)
+        private static int SelectStrongestAudioChannel(byte[] buffer, int frames, int channels, int blockAlign, int bytesPerSample, bool isFloat, out bool shouldLockChannel)
         {
-            if (channels <= 1) return 0;
+            shouldLockChannel = false;
+            if (channels <= 1)
+            {
+                shouldLockChannel = true;
+                return 0;
+            }
 
             long[] energy = new long[channels];
             for (int frame = 0; frame < frames; frame++)
@@ -960,6 +983,8 @@ namespace ExpressPackingMonitoring.ViewModels
                     strongest = energy[channel];
                 }
             }
+
+            shouldLockChannel = strongest > (long)frames * 16;
             return selected;
         }
 
@@ -968,11 +993,8 @@ namespace ExpressPackingMonitoring.ViewModels
             if (format.Encoding == WaveFormatEncoding.IeeeFloat) return true;
             if (format.Encoding != WaveFormatEncoding.Extensible) return false;
 
-            var subFormat = GetWaveFormatSubFormat(format);
-            if (subFormat == Guid.Empty)
-                return format.BitsPerSample == 32;
-
-            return subFormat == new Guid("00000003-0000-0010-8000-00aa00389b71");
+            return format is WaveFormatExtensible extensible
+                && extensible.SubFormat == new Guid("00000003-0000-0010-8000-00aa00389b71");
         }
 
         private static bool IsPcmWaveFormat(WaveFormat format)
@@ -980,23 +1002,8 @@ namespace ExpressPackingMonitoring.ViewModels
             if (format.Encoding == WaveFormatEncoding.Pcm) return true;
             if (format.Encoding != WaveFormatEncoding.Extensible) return false;
 
-            var subFormat = GetWaveFormatSubFormat(format);
-            if (subFormat == Guid.Empty)
-                return format.BitsPerSample == 8 || format.BitsPerSample == 16 || format.BitsPerSample == 24;
-
-            return subFormat == new Guid("00000001-0000-0010-8000-00aa00389b71");
-        }
-
-        private static Guid GetWaveFormatSubFormat(WaveFormat format)
-        {
-            try
-            {
-                var property = format.GetType().GetProperty("SubFormat");
-                if (property?.GetValue(format) is Guid guid)
-                    return guid;
-            }
-            catch { }
-            return Guid.Empty;
+            return format is WaveFormatExtensible extensible
+                && extensible.SubFormat == new Guid("00000001-0000-0010-8000-00aa00389b71");
         }
 
         private static short ReadFloatSampleAsPcm16(byte[] buffer, int offset, int bytesPerSample)

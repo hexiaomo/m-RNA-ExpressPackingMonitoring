@@ -64,6 +64,7 @@ namespace ExpressPackingMonitoring.ViewModels
         private short _audioPeakSinceLastCheck;
         private long _audioBytesSinceLastCheck;
         private int _silentAudioCheckCount;
+        private int _audioSelectedSourceChannel = -1;
 
         private Mat _previousCheckFrame = new Mat();
         private BitmapSource _videoFrame;
