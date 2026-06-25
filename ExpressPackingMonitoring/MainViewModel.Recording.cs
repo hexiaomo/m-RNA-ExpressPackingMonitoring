@@ -770,6 +770,7 @@ namespace ExpressPackingMonitoring.ViewModels
                 _audioMonitorTask = Task.Run(() => AudioCaptureMonitorLoop(_audioMonitorCts.Token));
                 Debug.WriteLine($"[Audio] 开始录音: {device.FriendlyName}");
                 WriteAudioDiagnostic($"开始录音: device={device.FriendlyName}, sourceFormat={capture.WaveFormat}, wavFormat={writerFormat}");
+                WriteAudioDiagnostic("WASAPI 采集模式: eventSync=true, bufferMs=100");
                 return true;
             }
             catch (Exception ex)
@@ -934,7 +935,7 @@ namespace ExpressPackingMonitoring.ViewModels
 
         private WasapiCapture CreateWasapiCapture(MMDevice device)
         {
-            var capture = new WasapiCapture(device, false, 200)
+            var capture = new WasapiCapture(device, true, 100)
             {
                 ShareMode = AudioClientShareMode.Shared
             };
