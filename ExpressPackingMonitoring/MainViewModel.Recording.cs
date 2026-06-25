@@ -1755,12 +1755,16 @@ namespace ExpressPackingMonitoring.ViewModels
             if (!File.Exists(mp4Path)) return false;
             if (!requireAudio) return true;
 
+            string decodedWavPath = Path.Combine(
+                Path.GetDirectoryName(mp4Path) ?? AppDomain.CurrentDomain.BaseDirectory,
+                $"{Path.GetFileNameWithoutExtension(mp4Path)}.mp4_audio_check_{Guid.NewGuid():N}.wav");
+
             try
             {
                 var psi = new ProcessStartInfo
                 {
                     FileName = ffmpegPath,
-                    Arguments = $"-v error -i \"{mp4Path}\" -map 0:a:0 -f null NUL",
+                    Arguments = $"-y -v error -i \"{mp4Path}\" -map 0:a:0 -ac 1 -ar 48000 -sample_fmt s16 \"{decodedWavPath}\"",
                     UseShellExecute = false,
                     CreateNoWindow = true,
                     RedirectStandardError = true,
@@ -1790,16 +1794,29 @@ namespace ExpressPackingMonitoring.ViewModels
                 {
                     Debug.WriteLine($"[MkvToMp4] 音轨校验失败: {stderr}");
                     WriteAudioDiagnostic($"MP4 音轨校验失败: {stderr}");
+                    return false;
                 }
-                if (ok)
-                    WriteAudioDiagnostic("MP4 音轨完整解码校验通过");
-                return ok;
+
+                using var reader = new WaveFileReader(decodedWavPath);
+                var timeline = LogAudioPeakTimeline(reader, audioLogPath, "MP4");
+                if (!IsAudioTimelineUsable(reader.TotalTime.TotalSeconds, timeline.FirstActiveSecond, timeline.LastActiveSecond, timeline.ActiveWindowCount, timeline.MaxConsecutiveActiveWindows, out string reason))
+                {
+                    WriteAudioDiagnostic($"MP4 音轨疑似提前静音: {reason}", audioLogPath);
+                    return false;
+                }
+
+                WriteAudioDiagnostic("MP4 音轨完整解码和时间线校验通过", audioLogPath);
+                return true;
             }
             catch (Exception ex)
             {
                 Debug.WriteLine($"[MkvToMp4] 音轨校验异常: {ex.Message}");
                 WriteAudioDiagnostic($"MP4 音轨校验异常: {ex.Message}");
                 return false;
+            }
+            finally
+            {
+                try { if (File.Exists(decodedWavPath)) File.Delete(decodedWavPath); } catch { }
             }
         }
 
@@ -1872,7 +1889,7 @@ namespace ExpressPackingMonitoring.ViewModels
             return true;
         }
 
-        private (double FirstActiveSecond, double LastActiveSecond, int ActiveWindowCount, int MaxConsecutiveActiveWindows) LogAudioPeakTimeline(WaveFileReader reader, string? audioLogPath)
+        private (double FirstActiveSecond, double LastActiveSecond, int ActiveWindowCount, int MaxConsecutiveActiveWindows) LogAudioPeakTimeline(WaveFileReader reader, string? audioLogPath, string sourceLabel = "WAV")
         {
             try
             {
@@ -1925,15 +1942,15 @@ namespace ExpressPackingMonitoring.ViewModels
                     windowIndex++;
                 }
 
-                string timeline = $"WAV 分段峰值: {string.Join("; ", parts)}; firstActive={firstActiveSecond:F1}s; lastActive={lastActiveSecond:F1}s; activeWindows={activeWindowCount}; maxConsecutive={maxConsecutiveActiveWindows}; activeThreshold=32";
+                string timeline = $"{sourceLabel} 分段峰值: {string.Join("; ", parts)}; firstActive={firstActiveSecond:F1}s; lastActive={lastActiveSecond:F1}s; activeWindows={activeWindowCount}; maxConsecutive={maxConsecutiveActiveWindows}; activeThreshold=32";
                 Debug.WriteLine($"[Audio] {timeline}");
                 WriteAudioDiagnostic(timeline, audioLogPath);
                 return (firstActiveSecond, lastActiveSecond, activeWindowCount, maxConsecutiveActiveWindows);
             }
             catch (Exception ex)
             {
-                Debug.WriteLine($"[Audio] WAV 分段峰值检查失败: {ex.Message}");
-                WriteAudioDiagnostic($"WAV 分段峰值检查失败: {ex.Message}", audioLogPath);
+                Debug.WriteLine($"[Audio] {sourceLabel} 分段峰值检查失败: {ex.Message}");
+                WriteAudioDiagnostic($"{sourceLabel} 分段峰值检查失败: {ex.Message}", audioLogPath);
                 return (-1, -1, 0, 0);
             }
         }
