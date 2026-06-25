@@ -9,6 +9,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
+using EdgeTTS;
 using Windows.Media.SpeechSynthesis;
 using SherpaOnnx;
 
@@ -38,6 +39,8 @@ namespace ExpressPackingMonitoring.Services
         private Thread? _preGenThread;
         private readonly ManualResetEventSlim _speechProcessingGate = new(initialState: true);
         private readonly object _speechStateLock = new();
+        private readonly object _mciLock = new();
+        private string? _currentMciAlias;
         private volatile bool _pauseForRecordingRequested;
 
         /// <summary>AI TTS 模型空闲多少分钟后自动卸载释放内存，0 = 不自动卸载</summary>
@@ -48,15 +51,20 @@ namespace ExpressPackingMonitoring.Services
 
         public bool EnableSoundPrompt { get; set; } = true;
         public bool EnableAiTts { get; set; } = false;
+        public string AiTtsEngine { get; set; } = "Kokoro";
         public int AiTtsSpeakerId { get; set; } = 51;
         public int AiTtsWarningSpeakerId { get; set; } = 50;
         public float AiTtsSpeed { get; set; } = 1.0f;
+        public string EdgeTtsVoice { get; set; } = "zh-CN-XiaoxiaoNeural";
+        public string EdgeTtsWarningVoice { get; set; } = "zh-CN-YunxiNeural";
 
         /// <summary>推理提供者：cpu / directml / cuda。切换 GPU 需要对应的 onnxruntime DLL</summary>
         public string AiTtsProvider { get; set; } = "cpu";
 
         /// <summary>AI TTS 模型是否已成功加载</summary>
-        public bool IsAiTtsAvailable => _kokoroTts != null;
+        public bool IsAiTtsAvailable => IsEdgeTtsEngine || _kokoroTts != null;
+
+        private bool IsEdgeTtsEngine => string.Equals(AiTtsEngine, "Edge", StringComparison.OrdinalIgnoreCase);
 
         public SpeechService()
         {
@@ -149,6 +157,13 @@ namespace ExpressPackingMonitoring.Services
         {
             try
             {
+                EnsureTtsCacheDir();
+                if (IsEdgeTtsEngine)
+                {
+                    Debug.WriteLine("[SpeechService] Edge TTS enabled");
+                    return;
+                }
+
                 if (modelDir == null)
                 {
                     var exeDir = AppDomain.CurrentDomain.BaseDirectory;
@@ -229,7 +244,7 @@ namespace ExpressPackingMonitoring.Services
 
                         if (EnableAiTts)
                         {
-                            SpeakWithKokoro(fullText, req.IsWarning);
+                            SpeakWithAiTts(fullText, req.IsWarning);
                         }
                         else
                         {
@@ -263,40 +278,127 @@ namespace ExpressPackingMonitoring.Services
             return true;
         }
 
-        private bool SpeakWithKokoro(string text, bool isWarning)
+        private bool SpeakWithAiTts(string text, bool isWarning)
         {
-            int sid = isWarning ? AiTtsWarningSpeakerId : AiTtsSpeakerId;
-
-            // 电商场景文本预处理
             text = PreprocessTextForTts(text);
+            string voiceKey = GetCurrentVoiceKey(isWarning);
+            string extension = IsEdgeTtsEngine ? ".mp3" : ".wav";
 
-            Debug.WriteLine($"[SpeechService] Kokoro: sid={sid}, speed={AiTtsSpeed}, text=\"{text}\"");
+            Debug.WriteLine($"[SpeechService] {AiTtsEngine}: voice={voiceKey}, speed={AiTtsSpeed}, text=\"{text}\"");
 
-            // 1. 尝试从磁盘缓存读取（命中缓存只是读文件+播放，不涉及 AI 生成，录制中也允许）
-            string cacheKey = GetCacheKey(text, AiTtsSpeed, sid);
-            byte[]? wavData = LoadFromCache(cacheKey);
-            if (wavData != null)
+            string cacheKey = GetCacheKey(text, AiTtsSpeed, voiceKey, AiTtsEngine);
+            string? cachePath = GetCachePath(cacheKey, extension);
+            if (cachePath != null && File.Exists(cachePath))
             {
                 Debug.WriteLine($"[SpeechService] Cache HIT: {cacheKey}");
                 if (!_speechCancelRequested && !_isDisposed)
-                    PlayWavBlocking(wavData);
+                {
+                    if (IsEdgeTtsEngine)
+                        PlayAudioFileBlocking(cachePath);
+                    else
+                        PlayWavBlocking(File.ReadAllBytes(cachePath));
+                }
                 return true;
             }
 
-            // 2. 缓存未命中：用系统语音及时播报，后台预生成AI缓存供下次使用
-            Debug.WriteLine($"[SpeechService] Cache MISS, 先用系统语音播报，后台预生成AI缓存");
+            Debug.WriteLine("[SpeechService] Cache MISS, fallback to Windows TTS and generate AI cache in background");
             SpeakWithWindowsTts(text, isWarning);
-            // 后台排队生成AI缓存（如果录制中，PreGenThread 会自动等待）
             PreGenerateCacheInternal(text, isWarning);
             return true;
         }
-
-        #region TTS 磁盘缓存
-        private static string GetCacheKey(string text, float speed, int sid)
+        private void GenerateEdgeTtsFile(string text, bool isWarning, string outputPath)
         {
-            string raw = $"{text}|{speed:F2}|{sid}";
+            string voice = isWarning ? EdgeTtsWarningVoice : EdgeTtsVoice;
+            if (string.IsNullOrWhiteSpace(voice))
+                voice = isWarning ? "zh-CN-YunxiNeural" : "zh-CN-XiaoxiaoNeural";
+
+            string tempPath = outputPath + ".tmp";
+            if (File.Exists(tempPath)) File.Delete(tempPath);
+
+            var communicate = new Communicate(text, voice, ToEdgeRate(AiTtsSpeed), "+0%", "+0Hz", null);
+            communicate.Save(tempPath).GetAwaiter().GetResult();
+
+            if (!File.Exists(tempPath) || new FileInfo(tempPath).Length == 0)
+                throw new InvalidOperationException("Edge TTS did not create audio output.");
+
+            if (File.Exists(outputPath)) File.Delete(outputPath);
+            File.Move(tempPath, outputPath);
+            Debug.WriteLine($"[SpeechService] PreGenerate Edge cached: {Path.GetFileName(outputPath)} ({new FileInfo(outputPath).Length / 1024}KB)");
+        }
+
+        private void PlayAudioFileBlocking(string path)
+        {
+            if (!File.Exists(path)) return;
+
+            string alias = "tts_" + Guid.NewGuid().ToString("N");
+            lock (_mciLock) _currentMciAlias = alias;
+
+            string escapedPath = path.Replace("\"", "\"\"");
+            try
+            {
+                if (mciSendString($"open \"{escapedPath}\" alias {alias}", null, 0, IntPtr.Zero) != 0)
+                    return;
+
+                if (mciSendString($"play {alias}", null, 0, IntPtr.Zero) != 0)
+                    return;
+
+                var status = new StringBuilder(32);
+                while (!_speechCancelRequested && !_isDisposed)
+                {
+                    status.Clear();
+                    mciSendString($"status {alias} mode", status, status.Capacity, IntPtr.Zero);
+                    if (string.Equals(status.ToString(), "stopped", StringComparison.OrdinalIgnoreCase))
+                        break;
+                    Thread.Sleep(20);
+                }
+
+                if (_speechCancelRequested || _isDisposed)
+                    mciSendString($"stop {alias}", null, 0, IntPtr.Zero);
+            }
+            finally
+            {
+                mciSendString($"close {alias}", null, 0, IntPtr.Zero);
+                lock (_mciLock)
+                {
+                    if (_currentMciAlias == alias)
+                        _currentMciAlias = null;
+                }
+            }
+        }
+        #region TTS 磁盘缓存
+        private static string GetCacheKey(string text, float speed, string voiceKey, string engine)
+        {
+            string raw = $"{engine}|{text}|{speed:F2}|{voiceKey}";
             byte[] hash = SHA256.HashData(Encoding.UTF8.GetBytes(raw));
             return Convert.ToHexString(hash);
+        }
+
+        private void EnsureTtsCacheDir()
+        {
+            _ttsCacheDir ??= Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "tts_cache");
+            Directory.CreateDirectory(_ttsCacheDir);
+        }
+
+        private string? GetCachePath(string cacheKey, string extension)
+        {
+            EnsureTtsCacheDir();
+            string path = Path.Combine(_ttsCacheDir!, cacheKey + extension);
+            if (File.Exists(path))
+                File.SetLastAccessTimeUtc(path, DateTime.UtcNow);
+            return path;
+        }
+
+        private string GetCurrentVoiceKey(bool isWarning)
+        {
+            if (IsEdgeTtsEngine)
+                return isWarning ? EdgeTtsWarningVoice : EdgeTtsVoice;
+            return (isWarning ? AiTtsWarningSpeakerId : AiTtsSpeakerId).ToString();
+        }
+
+        private static string ToEdgeRate(float speed)
+        {
+            int percent = (int)Math.Round((Math.Clamp(speed, 0.5f, 2.0f) - 1.0f) * 100.0f);
+            return percent >= 0 ? $"+{percent}%" : $"{percent}%";
         }
 
         private byte[]? LoadFromCache(string cacheKey)
@@ -343,7 +445,10 @@ namespace ExpressPackingMonitoring.Services
                 var dir = new DirectoryInfo(_ttsCacheDir);
                 if (!dir.Exists) return;
 
-                var files = dir.GetFiles("*.wav");
+                var files = dir.GetFiles("*.*")
+                    .Where(f => string.Equals(f.Extension, ".wav", StringComparison.OrdinalIgnoreCase)
+                             || string.Equals(f.Extension, ".mp3", StringComparison.OrdinalIgnoreCase))
+                    .ToArray();
                 long totalSize = files.Sum(f => f.Length);
                 long maxBytes = (long)TtsCacheMaxSizeMB * 1024 * 1024;
 
@@ -373,8 +478,13 @@ namespace ExpressPackingMonitoring.Services
             {
                 if (_ttsCacheDir != null && Directory.Exists(_ttsCacheDir))
                 {
-                    foreach (var f in Directory.GetFiles(_ttsCacheDir, "*.wav"))
-                        File.Delete(f);
+                    foreach (var f in Directory.GetFiles(_ttsCacheDir, "*.*"))
+                    {
+                        var ext = Path.GetExtension(f);
+                        if (string.Equals(ext, ".wav", StringComparison.OrdinalIgnoreCase)
+                            || string.Equals(ext, ".mp3", StringComparison.OrdinalIgnoreCase))
+                            File.Delete(f);
+                    }
                     Debug.WriteLine("[SpeechService] TTS cache cleared");
                 }
             }
@@ -389,8 +499,9 @@ namespace ExpressPackingMonitoring.Services
         /// </summary>
         public void PreGenerateCache(string text, bool isWarning = false)
         {
-            if (!EnableAiTts || _ttsCacheDir == null) return;
+            if (!EnableAiTts) return;
             if (string.IsNullOrWhiteSpace(text)) return;
+            EnsureTtsCacheDir();
 
             // 预处理文本（与播放时保持一致）
             text = PreprocessTextForTts(text);
@@ -400,14 +511,16 @@ namespace ExpressPackingMonitoring.Services
         /// <summary>内部版本，text 已预处理，避免重复预处理</summary>
         private void PreGenerateCacheInternal(string text, bool isWarning)
         {
-            if (!EnableAiTts || _ttsCacheDir == null) return;
+            if (!EnableAiTts) return;
             if (string.IsNullOrWhiteSpace(text)) return;
+            EnsureTtsCacheDir();
 
-            int sid = isWarning ? AiTtsWarningSpeakerId : AiTtsSpeakerId;
-            string cacheKey = GetCacheKey(text, AiTtsSpeed, sid);
+            string voiceKey = GetCurrentVoiceKey(isWarning);
+            string extension = IsEdgeTtsEngine ? ".mp3" : ".wav";
+            string cacheKey = GetCacheKey(text, AiTtsSpeed, voiceKey, AiTtsEngine);
 
             // 已有缓存则跳过
-            string cachePath = Path.Combine(_ttsCacheDir, cacheKey + ".wav");
+            string cachePath = Path.Combine(_ttsCacheDir!, cacheKey + extension);
             if (File.Exists(cachePath)) return;
 
             // 加入预生成队列，由专用单线程依次处理
@@ -438,38 +551,46 @@ namespace ExpressPackingMonitoring.Services
                     if (_isDisposed) break;
                     try
                     {
-                        int sid = isWarning ? AiTtsWarningSpeakerId : AiTtsSpeakerId;
-                        string cacheKey = GetCacheKey(text, AiTtsSpeed, sid);
-                        string cachePath = Path.Combine(_ttsCacheDir!, cacheKey + ".wav");
+                        string voiceKey = GetCurrentVoiceKey(isWarning);
+                        string extension = IsEdgeTtsEngine ? ".mp3" : ".wav";
+                        string cacheKey = GetCacheKey(text, AiTtsSpeed, voiceKey, AiTtsEngine);
+                        string cachePath = Path.Combine(_ttsCacheDir!, cacheKey + extension);
                         if (File.Exists(cachePath)) continue;
 
-                        lock (_kokoroLock)
+                        if (IsEdgeTtsEngine)
                         {
-                            EnsureKokoroLoaded();
-                            var tts = _kokoroTts;
-                            if (tts == null) return;
-                            _lastTtsUseTime = DateTime.Now;
+                            GenerateEdgeTtsFile(text, isWarning, cachePath);
+                        }
+                        else
+                        {
+                            int sid = isWarning ? AiTtsWarningSpeakerId : AiTtsSpeakerId;
+                            lock (_kokoroLock)
+                            {
+                                EnsureKokoroLoaded();
+                                var tts = _kokoroTts;
+                                if (tts == null) return;
+                                _lastTtsUseTime = DateTime.Now;
 
-                            Debug.WriteLine($"[SpeechService] PreGenerate: sid={sid}, text=\"{text}\"");
-                            var audio = tts.Generate(text, AiTtsSpeed, sid);
-                            if (audio == null || audio.NumSamples <= 0)
-                            {
-                                audio?.Dispose();
-                                continue;
-                            }
+                                Debug.WriteLine($"[SpeechService] PreGenerate Kokoro: sid={sid}, text=\"{text}\"");
+                                var audio = tts.Generate(text, AiTtsSpeed, sid);
+                                if (audio == null || audio.NumSamples <= 0)
+                                {
+                                    audio?.Dispose();
+                                    continue;
+                                }
 
-                            try
-                            {
-                                var wavData = BuildWav16(audio.Samples, audio.SampleRate);
-                                File.WriteAllBytes(cachePath, wavData);
-                                Debug.WriteLine($"[SpeechService] PreGenerate cached: {cacheKey}.wav ({wavData.Length / 1024}KB)");
-                            }
-                            finally
-                            {
-                                audio.Dispose();
+                                try
+                                {
+                                    var wavData = BuildWav16(audio.Samples, audio.SampleRate);
+                                    File.WriteAllBytes(cachePath, wavData);
+                                    Debug.WriteLine($"[SpeechService] PreGenerate cached: {cacheKey}{extension} ({wavData.Length / 1024}KB)");
+                                }
+                                finally
+                                {
+                                    audio.Dispose();
+                                }
                             }
                         }
-
                         if (TtsCacheMaxSizeMB > 0)
                             CleanupCache();
                     }
@@ -726,6 +847,11 @@ namespace ExpressPackingMonitoring.Services
         public void Stop()
         {
             _speechCancelRequested = true;
+            lock (_mciLock)
+            {
+                if (!string.IsNullOrEmpty(_currentMciAlias))
+                    mciSendString($"stop {_currentMciAlias}", null, 0, IntPtr.Zero);
+            }
             while (_speechQueue != null && _speechQueue.TryTake(out _)) { }
         }
 
@@ -758,6 +884,8 @@ namespace ExpressPackingMonitoring.Services
         private static extern int waveOutReset(IntPtr hwo);
         [DllImport("winmm.dll")]
         private static extern int waveOutClose(IntPtr hwo);
+        [DllImport("winmm.dll", CharSet = CharSet.Unicode)]
+        private static extern int mciSendString(string command, StringBuilder? returnValue, int returnLength, IntPtr winHandle);
 
         private const uint WAVE_MAPPER = 0xFFFFFFFF;
         private const uint CALLBACK_NULL = 0x00000000;
@@ -780,7 +908,7 @@ namespace ExpressPackingMonitoring.Services
         /// <summary>如果模型已卸载则重新加载</summary>
         private void EnsureKokoroLoaded()
         {
-            if (_kokoroTts != null || _isDisposed || !EnableAiTts) return;
+            if (_kokoroTts != null || _isDisposed || !EnableAiTts || IsEdgeTtsEngine) return;
             lock (_kokoroLock)
             {
                 if (_kokoroTts != null) return;

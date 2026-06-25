@@ -59,7 +59,7 @@
 
 ### 🗣️ AI语音播报
 
-- 支持对接 Kokoro 本地AI语音引擎，彻底告别Windows自带机械音
+- 支持 Kokoro 本地AI语音引擎与 Edge TTS 在线神经语音可选，彻底告别Windows自带机械音
 - 内置电商商品名智能断词预处理逻辑，解决本地TTS连读糊读问题，播报更自然流畅
 - 首次运行生成语音缓存，后续相同文本直接调用，极大提升响应速度
 
@@ -142,11 +142,12 @@ dotnet publish ExpressPackingMonitoring -c Release -r win-x64 --self-contained f
 - 点击「保存应用」，重启软件后生效
 - 同网内设备打开浏览器，输入 `http://[上位机IP]:5280` 即可访问录像回放页面
 
-#### 3. Kokoro AI语音模型启用
+#### 3. AI语音引擎启用
 
 - 打开软件设置页面，进入「高级设置」选项卡
 - 开启「启用 AI 语音」开关
-- 下载 Kokoro 语音模型后，解压至软件根目录即可自动识别
+- 在「语音引擎」中选择 Kokoro 本地模型或 Edge TTS 在线语音
+- 选择 Kokoro 时，下载语音模型后解压至软件根目录即可自动识别；选择 Edge TTS 时需保持网络可用
 
 ```powershell
 Invoke-WebRequest -Uri "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/kokoro-multi-lang-v1_0.tar.bz2" -OutFile "kokoro-multi-lang-v1_0.tar.bz2" -UseBasicParsing

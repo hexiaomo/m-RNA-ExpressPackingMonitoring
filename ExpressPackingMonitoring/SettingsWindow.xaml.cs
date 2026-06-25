@@ -696,9 +696,12 @@ namespace ExpressPackingMonitoring
                 {
                     EnableSoundPrompt = true,
                     EnableAiTts = Config.EnableAiTts,
+                    AiTtsEngine = Config.AiTtsEngine,
                     AiTtsSpeakerId = Config.AiTtsSpeakerId,
                     AiTtsWarningSpeakerId = Config.AiTtsWarningSpeakerId,
                     AiTtsSpeed = Config.AiTtsSpeed,
+                    EdgeTtsVoice = Config.EdgeTtsVoice,
+                    EdgeTtsWarningVoice = Config.EdgeTtsWarningVoice,
                 };
                 // 同步当前编辑中的断句关键词
                 var words = TtsBreakWordsTextBox.Text
@@ -712,9 +715,12 @@ namespace ExpressPackingMonitoring
             {
                 // 更新参数
                 _previewSpeechService.EnableAiTts = Config.EnableAiTts;
+                _previewSpeechService.AiTtsEngine = Config.AiTtsEngine;
                 _previewSpeechService.AiTtsSpeakerId = Config.AiTtsSpeakerId;
                 _previewSpeechService.AiTtsWarningSpeakerId = Config.AiTtsWarningSpeakerId;
                 _previewSpeechService.AiTtsSpeed = Config.AiTtsSpeed;
+                _previewSpeechService.EdgeTtsVoice = Config.EdgeTtsVoice;
+                _previewSpeechService.EdgeTtsWarningVoice = Config.EdgeTtsWarningVoice;
                 var words = TtsBreakWordsTextBox.Text
                     .Split(new[] { '\r', '\n', '，', ',', ' ' }, StringSplitOptions.RemoveEmptyEntries)
                     .Select(w => w.Trim()).Where(w => w.Length > 0);

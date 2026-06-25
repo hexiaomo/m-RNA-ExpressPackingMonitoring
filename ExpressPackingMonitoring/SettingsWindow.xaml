@@ -1010,7 +1010,7 @@
                             <Border Style="{StaticResource SectionCardStyle}">
                                 <StackPanel>
                                     <TextBlock Text="AI 语音合成" Style="{StaticResource SectionTitleStyle}"/>
-                                    <TextBlock Text="使用开源 Kokoro TTS 模型替代系统语音，效果更自然。需下载约 350MB 模型文件到程序目录。"
+                                    <TextBlock Text="可选择 Kokoro 本地模型或 Edge TTS 在线语音，生成后写入缓存；不可用时回退系统语音。"
                                                Style="{StaticResource SectionHintStyle}"/>
                                     <Border Height="1" Background="{DynamicResource BorderLight}" Margin="0,12,0,12"/>
 
@@ -1021,7 +1021,7 @@
                                         </Grid.ColumnDefinitions>
                                         <StackPanel Margin="0,0,16,0">
                                             <TextBlock Text="启用 AI 语音" Style="{StaticResource FieldLabelStyle}"/>
-                                            <TextBlock Text="开启后使用 Kokoro 模型生成自然语音播报，关闭则使用系统自带语音。"
+                                            <TextBlock Text="开启后使用所选引擎生成自然语音播报，关闭则使用系统自带语音。"
                                                        Style="{StaticResource FieldHintStyle}"/>
                                         </StackPanel>
                                         <CheckBox x:Name="AiTtsCheckBox"
@@ -1030,6 +1030,27 @@
                                                   VerticalAlignment="Center"
                                                   HorizontalAlignment="Left"
                                                   Style="{StaticResource ToggleSwitchStyle}"/>
+                                    </Grid>
+
+                                    <Grid Style="{StaticResource SettingRowStyle}" Margin="0,0,0,8"
+                                          IsEnabled="{Binding IsChecked, ElementName=AiTtsCheckBox, TargetNullValue=False}">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="230"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Margin="0,0,16,0">
+                                            <TextBlock Text="语音引擎" Style="{StaticResource FieldLabelStyle}"/>
+                                            <TextBlock Text="Kokoro 为本地离线模型；Edge TTS 使用在线神经语音，失败时回退系统语音。"
+                                                       Style="{StaticResource FieldHintStyle}"/>
+                                        </StackPanel>
+                                        <ComboBox Grid.Column="1"
+                                                  Width="220"
+                                                  HorizontalAlignment="Left"
+                                                  SelectedValue="{Binding Config.AiTtsEngine}"
+                                                  SelectedValuePath="Tag">
+                                            <ComboBoxItem Content="Kokoro 本地模型" Tag="Kokoro"/>
+                                            <ComboBoxItem Content="Edge TTS 在线语音" Tag="Edge"/>
+                                        </ComboBox>
                                     </Grid>
 
                                     <Grid Style="{StaticResource SettingRowStyle}" Margin="0,0,0,8"
@@ -1068,6 +1089,40 @@
                                                             Minimum="0"
                                                             Maximum="102"
                                                             Increment="1"/>
+                                    </Grid>
+
+                                    <Grid Style="{StaticResource SettingRowStyle}" Margin="0,0,0,8"
+                                          IsEnabled="{Binding IsChecked, ElementName=AiTtsCheckBox, TargetNullValue=False}">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="230"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Margin="0,0,16,0">
+                                            <TextBlock Text="Edge 普通声线" Style="{StaticResource FieldLabelStyle}"/>
+                                            <TextBlock Text="例如 zh-CN-XiaoxiaoNeural，切换到 Edge TTS 时使用。"
+                                                       Style="{StaticResource FieldHintStyle}"/>
+                                        </StackPanel>
+                                        <TextBox Grid.Column="1"
+                                                 Width="260"
+                                                 HorizontalAlignment="Left"
+                                                 Text="{Binding Config.EdgeTtsVoice, UpdateSourceTrigger=PropertyChanged}"/>
+                                    </Grid>
+
+                                    <Grid Style="{StaticResource SettingRowStyle}" Margin="0,0,0,8"
+                                          IsEnabled="{Binding IsChecked, ElementName=AiTtsCheckBox, TargetNullValue=False}">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="230"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Margin="0,0,16,0">
+                                            <TextBlock Text="Edge 警告声线" Style="{StaticResource FieldLabelStyle}"/>
+                                            <TextBlock Text="例如 zh-CN-YunxiNeural，用于重复单号、非法单号等警告。"
+                                                       Style="{StaticResource FieldHintStyle}"/>
+                                        </StackPanel>
+                                        <TextBox Grid.Column="1"
+                                                 Width="260"
+                                                 HorizontalAlignment="Left"
+                                                 Text="{Binding Config.EdgeTtsWarningVoice, UpdateSourceTrigger=PropertyChanged}"/>
                                     </Grid>
 
                                     <Grid Style="{StaticResource SettingRowStyle}" Margin="0,0,0,0"

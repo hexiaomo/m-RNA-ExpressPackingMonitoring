@@ -308,9 +308,12 @@ namespace ExpressPackingMonitoring.ViewModels
             {
                 EnableSoundPrompt = Config.EnableSoundPrompt,
                 EnableAiTts = Config.EnableAiTts,
+                AiTtsEngine = Config.AiTtsEngine,
                 AiTtsSpeakerId = Config.AiTtsSpeakerId,
                 AiTtsWarningSpeakerId = Config.AiTtsWarningSpeakerId,
-                AiTtsSpeed = Config.AiTtsSpeed
+                AiTtsSpeed = Config.AiTtsSpeed,
+                EdgeTtsVoice = Config.EdgeTtsVoice,
+                EdgeTtsWarningVoice = Config.EdgeTtsWarningVoice
             };
             _speechService.UpdateBreakWords(Config.TtsBreakWords);
             if (Config.EnableAiTts)
@@ -628,6 +631,12 @@ namespace ExpressPackingMonitoring.ViewModels
             if (Config.VideoCqp <= 0)
                 Config.VideoCqp = 25;
             Config.AudioSyncOffsetMs = Math.Clamp(Config.AudioSyncOffsetMs, -5000, 5000);
+            if (string.IsNullOrWhiteSpace(Config.AiTtsEngine))
+                Config.AiTtsEngine = "Kokoro";
+            if (string.IsNullOrWhiteSpace(Config.EdgeTtsVoice))
+                Config.EdgeTtsVoice = "zh-CN-XiaoxiaoNeural";
+            if (string.IsNullOrWhiteSpace(Config.EdgeTtsWarningVoice))
+                Config.EdgeTtsWarningVoice = "zh-CN-YunxiNeural";
             
             // Apply Theme
             if (Enum.TryParse<ExpressPackingMonitoring.Themes.AppTheme>(Config.Theme, out var themeEnum))
@@ -661,7 +670,8 @@ namespace ExpressPackingMonitoring.ViewModels
                         || Config.Fps != clonedConfig.Fps;
                     bool themeChanged = Config.Theme != clonedConfig.Theme;
                     bool globalKeyChanged = Config.EnableGlobalKeyboard != clonedConfig.EnableGlobalKeyboard;
-                    bool aiTtsChanged = Config.EnableAiTts != clonedConfig.EnableAiTts;
+                    bool aiTtsChanged = Config.EnableAiTts != clonedConfig.EnableAiTts
+                        || Config.AiTtsEngine != clonedConfig.AiTtsEngine;
 
                     Config = clonedConfig; 
                     SaveConfig(); 
@@ -671,9 +681,12 @@ namespace ExpressPackingMonitoring.ViewModels
                     {
                         _speechService.EnableSoundPrompt = Config.EnableSoundPrompt;
                         _speechService.EnableAiTts = Config.EnableAiTts;
+                        _speechService.AiTtsEngine = Config.AiTtsEngine;
                         _speechService.AiTtsSpeakerId = Config.AiTtsSpeakerId;
                         _speechService.AiTtsWarningSpeakerId = Config.AiTtsWarningSpeakerId;
                         _speechService.AiTtsSpeed = Config.AiTtsSpeed;
+                        _speechService.EdgeTtsVoice = Config.EdgeTtsVoice;
+                        _speechService.EdgeTtsWarningVoice = Config.EdgeTtsWarningVoice;
                         _speechService.UpdateBreakWords(Config.TtsBreakWords);
                         if (aiTtsChanged && Config.EnableAiTts && !_speechService.IsAiTtsAvailable)
                             _speechService.InitAiTts();
