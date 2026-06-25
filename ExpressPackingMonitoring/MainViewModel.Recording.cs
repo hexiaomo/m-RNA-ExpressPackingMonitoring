@@ -744,6 +744,7 @@ namespace ExpressPackingMonitoring.ViewModels
                     _audioRestarting = false;
                     _lastAudioDataAt = DateTime.Now;
                     _lastAudioPacketAt = DateTime.Now;
+                    _audioSuppressUntil = DateTime.Now.AddMilliseconds(500);
                     _audioBytesWritten = 0;
                     _audioPeakSinceLastCheck = 0;
                     _audioBytesSinceLastCheck = 0;
@@ -868,7 +869,8 @@ namespace ExpressPackingMonitoring.ViewModels
                 lock (_audioLock)
                 {
                     if (_audioWriter == null || e.BytesRecorded <= 0) return;
-                    _lastAudioPacketAt = DateTime.Now;
+                    var now = DateTime.Now;
+                    _lastAudioPacketAt = now;
                     int selectedChannel = _audioSelectedSourceChannel;
                     byte[]? pcmBytes = ConvertCaptureBufferToPcm16(e.Buffer, e.BytesRecorded, capture.WaveFormat, _audioWriter.WaveFormat, ref selectedChannel);
                     if (pcmBytes == null || pcmBytes.Length == 0)
@@ -885,7 +887,9 @@ namespace ExpressPackingMonitoring.ViewModels
                             _audioSelectedSourceChannel = selectedChannel;
                             diagnosticMessage = $"麦克风输入通道已选择: channel={selectedChannel}, sourceChannels={capture.WaveFormat.Channels}";
                         }
-                        PadAudioGapIfNeeded(DateTime.Now);
+                        if (now < _audioSuppressUntil)
+                            Array.Clear(pcmBytes, 0, pcmBytes.Length);
+                        PadAudioGapIfNeeded(now);
                         UpdateAudioLevelStats(pcmBytes, pcmBytes.Length, _audioWriter.WaveFormat);
                         EnqueueAudioBytes(pcmBytes);
                         _audioBytesWritten += pcmBytes.Length;
@@ -1286,6 +1290,7 @@ namespace ExpressPackingMonitoring.ViewModels
                     _audioCapture = capture;
                     _lastAudioDataAt = DateTime.Now;
                     _lastAudioPacketAt = DateTime.Now;
+                    _audioSuppressUntil = DateTime.Now.AddMilliseconds(500);
                     _audioPeakSinceLastCheck = 0;
                     _audioBytesSinceLastCheck = 0;
                     _silentAudioCheckCount = 0;

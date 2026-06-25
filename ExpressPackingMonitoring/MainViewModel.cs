@@ -64,6 +64,7 @@ namespace ExpressPackingMonitoring.ViewModels
         private bool _audioRestarting;
         private DateTime _lastAudioDataAt = DateTime.MinValue;
         private DateTime _lastAudioPacketAt = DateTime.MinValue;
+        private DateTime _audioSuppressUntil = DateTime.MinValue;
         private long _audioBytesWritten;
         private short _audioPeakSinceLastCheck;
         private long _audioBytesSinceLastCheck;
