@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 using System.Windows;
 using OpenCvSharp;
 using AForge.Video.DirectShow;
+using NAudio.CoreAudioApi;
 using NAudio.Wave;
 
 namespace ExpressPackingMonitoring.ViewModels
@@ -699,8 +700,8 @@ namespace ExpressPackingMonitoring.ViewModels
             {
                 StopAudioRecording();
 
-                int deviceNumber = ResolveAudioDeviceNumber();
-                if (deviceNumber < 0)
+                var device = ResolveAudioEndpoint();
+                if (device == null)
                 {
                     Debug.WriteLine("[Audio] 未找到可用麦克风端点");
                     return false;
@@ -708,12 +709,9 @@ namespace ExpressPackingMonitoring.ViewModels
 
                 Directory.CreateDirectory(Path.GetDirectoryName(audioFilePath)!);
 
-                var capture = new WaveInEvent
+                var capture = new WasapiCapture(device)
                 {
-                    DeviceNumber = deviceNumber,
-                    WaveFormat = new WaveFormat(44100, 16, 1),
-                    BufferMilliseconds = 100,
-                    NumberOfBuffers = 4
+                    ShareMode = AudioClientShareMode.Shared
                 };
                 var writer = new WaveFileWriter(audioFilePath, capture.WaveFormat);
 
@@ -740,7 +738,7 @@ namespace ExpressPackingMonitoring.ViewModels
                 }
 
                 capture.StartRecording();
-                Debug.WriteLine($"[Audio] 开始录音: {WaveInEvent.GetCapabilities(deviceNumber).ProductName}");
+                Debug.WriteLine($"[Audio] 开始录音: {device.FriendlyName}");
                 return true;
             }
             catch (Exception ex)
@@ -754,7 +752,7 @@ namespace ExpressPackingMonitoring.ViewModels
 
         private string? StopAudioRecording()
         {
-            WaveInEvent? capture;
+            WasapiCapture? capture;
             WaveFileWriter? writer;
             string? audioFilePath;
 
@@ -789,22 +787,40 @@ namespace ExpressPackingMonitoring.ViewModels
             return null;
         }
 
-        private int ResolveAudioDeviceNumber()
+        private MMDevice? ResolveAudioEndpoint()
         {
-            int count = WaveInEvent.DeviceCount;
-            if (count <= 0) return -1;
+            using var enumerator = new MMDeviceEnumerator();
+            var devices = enumerator.EnumerateAudioEndPoints(DataFlow.Capture, DeviceState.Active);
+            if (devices == null || devices.Count == 0) return null;
 
-            if (!string.IsNullOrWhiteSpace(Config.AudioDeviceName))
+            MMDevice? defaultDevice = null;
+            try { defaultDevice = enumerator.GetDefaultAudioEndpoint(DataFlow.Capture, Role.Console); } catch { }
+
+            if (!string.IsNullOrWhiteSpace(Config.AudioDeviceMoniker))
             {
-                for (int i = 0; i < count; i++)
+                foreach (var device in devices)
                 {
-                    var capabilities = WaveInEvent.GetCapabilities(i);
-                    if (AudioEndpointMatches(capabilities.ProductName, Config.AudioDeviceName))
-                        return i;
+                    if (AudioEndpointMatches(device.ID, Config.AudioDeviceMoniker))
+                        return device;
                 }
             }
 
-            return 0;
+            if (!string.IsNullOrWhiteSpace(Config.AudioDeviceName))
+            {
+                foreach (var device in devices)
+                {
+                    if (AudioEndpointMatches(device.FriendlyName, Config.AudioDeviceName)
+                        || AudioEndpointMatches(GetEndpointDisplayName(device), Config.AudioDeviceName))
+                        return device;
+                }
+            }
+
+            return defaultDevice ?? devices[0];
+        }
+
+        private static string GetEndpointDisplayName(MMDevice device)
+        {
+            try { return device.DeviceFriendlyName; } catch { return device.FriendlyName; }
         }
 
         private static bool AudioEndpointMatches(string endpointName, string configuredName)

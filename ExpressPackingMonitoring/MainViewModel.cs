@@ -51,7 +51,7 @@ namespace ExpressPackingMonitoring.ViewModels
         private CancellationTokenSource _writeCts;
         private int _actualCameraFps = 15; // 摄像头硬件实际帧率
         private readonly object _audioLock = new object();
-        private NAudio.Wave.WaveInEvent _audioCapture;
+        private NAudio.CoreAudioApi.WasapiCapture _audioCapture;
         private NAudio.Wave.WaveFileWriter _audioWriter;
         private string _currentAudioFilePath;
 
