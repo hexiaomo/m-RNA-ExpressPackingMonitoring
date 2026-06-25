@@ -1783,7 +1783,7 @@ namespace ExpressPackingMonitoring.ViewModels
             double trailingSilentSeconds = durationSeconds - lastActiveSecond;
             if (durationSeconds >= 30
                 && trailingSilentSeconds >= 15
-                && activeWindowCount <= 2)
+                && activeWindowCount <= 3)
             {
                 reason = $"duration={durationSeconds:F1}s, lastActive={lastActiveSecond:F1}s, activeWindows={activeWindowCount}, trailingSilent={trailingSilentSeconds:F1}s";
                 return false;
