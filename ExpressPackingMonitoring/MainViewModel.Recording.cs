@@ -730,11 +730,15 @@ namespace ExpressPackingMonitoring.ViewModels
                 var capture = CreateWasapiCapture(device);
                 var writerFormat = CreatePcm16WaveFormat(capture.WaveFormat);
                 var writer = new WaveFileWriter(audioFilePath, writerFormat);
+                var writeQueue = new BlockingCollection<byte[]>();
+                var writeTask = Task.Run(() => AudioFileWriteLoop(writer, writeQueue));
 
                 lock (_audioLock)
                 {
                     _audioCapture = capture;
                     _audioWriter = writer;
+                    _audioWriteQueue = writeQueue;
+                    _audioFileWriteTask = writeTask;
                     _currentAudioFilePath = audioFilePath;
                     _audioStopRequested = false;
                     _audioRestarting = false;
@@ -769,6 +773,8 @@ namespace ExpressPackingMonitoring.ViewModels
         {
             WasapiCapture? capture;
             WaveFileWriter? writer;
+            BlockingCollection<byte[]>? writeQueue;
+            Task? writeTask;
             string? audioFilePath;
             CancellationTokenSource? monitorCts;
             Task? monitorTask;
@@ -778,11 +784,15 @@ namespace ExpressPackingMonitoring.ViewModels
                 _audioStopRequested = true;
                 capture = _audioCapture;
                 writer = _audioWriter;
+                writeQueue = _audioWriteQueue;
+                writeTask = _audioFileWriteTask;
                 audioFilePath = _currentAudioFilePath;
                 monitorCts = _audioMonitorCts;
                 monitorTask = _audioMonitorTask;
                 _audioCapture = null;
                 _audioWriter = null;
+                _audioWriteQueue = null;
+                _audioFileWriteTask = null;
                 _currentAudioFilePath = null;
                 _audioMonitorCts = null;
                 _audioMonitorTask = null;
@@ -794,12 +804,15 @@ namespace ExpressPackingMonitoring.ViewModels
             try { capture?.Dispose(); } catch { }
             try { monitorTask?.Wait(1000); } catch { }
             try { monitorCts?.Dispose(); } catch { }
+            try { writeQueue?.CompleteAdding(); } catch { }
 
-            lock (_audioLock)
+            try { writeTask?.Wait(5000); } catch { }
+            if (writeTask == null)
             {
                 try { writer?.Flush(); } catch { }
                 try { writer?.Dispose(); } catch { }
             }
+            try { writeQueue?.Dispose(); } catch { }
 
             if (string.IsNullOrEmpty(audioFilePath)) return null;
 
@@ -846,7 +859,7 @@ namespace ExpressPackingMonitoring.ViewModels
                         }
                         PadAudioGapIfNeeded(DateTime.Now);
                         UpdateAudioLevelStats(pcmBytes, pcmBytes.Length, _audioWriter.WaveFormat);
-                        _audioWriter.Write(pcmBytes, 0, pcmBytes.Length);
+                        EnqueueAudioBytes(pcmBytes);
                         _audioBytesWritten += pcmBytes.Length;
                         _lastAudioDataAt = DateTime.Now;
                     }
@@ -887,12 +900,45 @@ namespace ExpressPackingMonitoring.ViewModels
             while (remaining > 0)
             {
                 int chunk = Math.Min(remaining, silence.Length);
-                _audioWriter.Write(silence, 0, chunk);
+                if (chunk == silence.Length)
+                {
+                    EnqueueAudioBytes(silence);
+                }
+                else
+                {
+                    byte[] partialSilence = new byte[chunk];
+                    EnqueueAudioBytes(partialSilence);
+                }
                 remaining -= chunk;
             }
             _audioBytesWritten += silenceBytes;
             Debug.WriteLine($"[Audio] 补齐录音间隙: {gapMs:F0}ms");
             WriteAudioDiagnostic($"补齐录音间隙: {gapMs:F0}ms, silenceBytes={silenceBytes}");
+        }
+
+        private void EnqueueAudioBytes(byte[] bytes)
+        {
+            if (_audioWriteQueue == null || _audioWriteQueue.IsAddingCompleted || bytes.Length == 0) return;
+            _audioWriteQueue.Add(bytes);
+        }
+
+        private void AudioFileWriteLoop(WaveFileWriter writer, BlockingCollection<byte[]> queue)
+        {
+            try
+            {
+                foreach (var bytes in queue.GetConsumingEnumerable())
+                    writer.Write(bytes, 0, bytes.Length);
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[Audio] WAV 写入异常: {ex.Message}");
+                WriteAudioDiagnostic($"WAV 写入异常: {ex.Message}");
+            }
+            finally
+            {
+                try { writer.Flush(); } catch { }
+                try { writer.Dispose(); } catch { }
+            }
         }
 
         private void UpdateAudioLevelStats(byte[] buffer, int bytesRecorded, WaveFormat format)
