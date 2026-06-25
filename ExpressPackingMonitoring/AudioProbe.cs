@@ -123,10 +123,18 @@ namespace ExpressPackingMonitoring
 
             Exception? stoppedException = null;
             capture.RecordingStopped += (_, e) => stoppedException = e.Exception;
+            string? ffmpegPath = FindFFmpeg();
 
             capture.StartRecording();
+            var videoTask = System.Threading.Tasks.Task.Run<(bool Exited, int ExitCode, string Stderr)>(() =>
+            {
+                return string.IsNullOrEmpty(ffmpegPath)
+                    ? (false, -1, "ffmpeg.exe not found.")
+                    : WriteSyntheticMkv(ffmpegPath, mkvPath, seconds);
+            });
             Thread.Sleep(TimeSpan.FromSeconds(seconds));
             capture.StopRecording();
+            var videoInfo = videoTask.GetAwaiter().GetResult();
             byte[]? tailBytes = MainViewModel.FlushResamplerTail(previousSourceSample, hasPreviousSourceSample, ref resamplePosition);
             if (tailBytes != null && tailBytes.Length > 0)
             {
@@ -137,8 +145,10 @@ namespace ExpressPackingMonitoring
             writer.Dispose();
 
             var wavInfo = ReadWavInfo(wavPath);
-            var mp4Info = ProbeMp4Mux(wavPath, mp4Path, seconds, config.AudioSyncOffsetMs);
+            var mp4Info = ProbeMp4Mux(mkvPath, wavPath, mp4Path, seconds, config.AudioSyncOffsetMs);
             bool ok = stoppedException == null
+                && videoInfo.Exited
+                && videoInfo.ExitCode == 0
                 && packets > 0
                 && bytes > 0
                 && gapCount == 0
@@ -158,6 +168,9 @@ namespace ExpressPackingMonitoring
             log.AppendLine($"WavError={wavInfo.Error ?? "(none)"}");
             log.AppendLine($"MkvPath={mkvPath}");
             log.AppendLine($"MkvBytes={(File.Exists(mkvPath) ? new FileInfo(mkvPath).Length : 0)}");
+            log.AppendLine($"MkvVideoExited={videoInfo.Exited}");
+            log.AppendLine($"MkvVideoExitCode={videoInfo.ExitCode}");
+            log.AppendLine($"MkvVideoError={(videoInfo.Exited && videoInfo.ExitCode == 0 ? "(none)" : TrimForLog(videoInfo.Stderr))}");
             log.AppendLine($"Mp4Path={mp4Path}");
             log.AppendLine($"Mp4Valid={mp4Info.Valid}");
             log.AppendLine($"Mp4Bytes={mp4Info.FileBytes}");
@@ -169,16 +182,14 @@ namespace ExpressPackingMonitoring
             return ok;
         }
 
-        private static (bool Valid, long FileBytes, bool AudioDecodeOk, string? Error) ProbeMp4Mux(string wavPath, string mp4Path, int seconds, int audioSyncOffsetMs)
+        private static (bool Valid, long FileBytes, bool AudioDecodeOk, string? Error) ProbeMp4Mux(string mkvPath, string wavPath, string mp4Path, int seconds, int audioSyncOffsetMs)
         {
             string? ffmpegPath = FindFFmpeg();
             if (string.IsNullOrEmpty(ffmpegPath))
                 return (false, 0, false, "ffmpeg.exe not found.");
 
-            string mkvPath = Path.ChangeExtension(mp4Path, ".mkv");
-            var video = WriteSyntheticMkv(ffmpegPath, mkvPath, seconds);
-            if (!video.Exited || video.ExitCode != 0 || !File.Exists(mkvPath) || new FileInfo(mkvPath).Length <= 0)
-                return (false, 0, false, $"Video MKV failed: exited={video.Exited}, exitCode={video.ExitCode}, stderr={TrimForLog(video.Stderr)}");
+            if (!File.Exists(mkvPath) || new FileInfo(mkvPath).Length <= 0)
+                return (false, 0, false, "Video MKV was not generated.");
 
             string muxArgs = MainViewModel.BuildMkvToMp4Args(mkvPath, wavPath, mp4Path, audioSyncOffsetMs);
             var mux = RunProcess(ffmpegPath, muxArgs, Math.Max(15000, seconds * 3000));
