@@ -44,6 +44,8 @@ namespace ExpressPackingMonitoring.Services
         private readonly object _filePlaybackLock = new();
         private IWavePlayer? _currentFileWaveOut;
         private volatile bool _pauseForRecordingRequested;
+        private DateTime _lastCacheCleanupTime = DateTime.MinValue;
+        private long _cacheBytesSinceCleanup;
 
         /// <summary>AI TTS 模型空闲多少分钟后自动卸载释放内存，0 = 不自动卸载</summary>
         public int AiTtsIdleUnloadMinutes { get; set; } = 1;
@@ -361,8 +363,7 @@ namespace ExpressPackingMonitoring.Services
                     }
                 }
 
-                if (TtsCacheMaxSizeMB > 0)
-                    CleanupCache();
+                RequestCacheCleanup(cachePath);
                 return File.Exists(cachePath);
             }
             catch (Exception ex)
@@ -516,8 +517,7 @@ namespace ExpressPackingMonitoring.Services
                 File.WriteAllBytes(path, wavData);
                 Debug.WriteLine($"[SpeechService] Cached: {cacheKey}.wav ({wavData.Length / 1024}KB)");
 
-                if (TtsCacheMaxSizeMB > 0)
-                    CleanupCache();
+                RequestCacheCleanup(path);
             }
             catch (Exception ex)
             {
@@ -557,6 +557,30 @@ namespace ExpressPackingMonitoring.Services
             {
                 Debug.WriteLine($"[SpeechService] Cache cleanup error: {ex.Message}");
             }
+        }
+
+        private void RequestCacheCleanup(string? newCachePath = null)
+        {
+            if (TtsCacheMaxSizeMB <= 0) return;
+
+            if (!string.IsNullOrEmpty(newCachePath))
+            {
+                try
+                {
+                    if (File.Exists(newCachePath))
+                        _cacheBytesSinceCleanup += new FileInfo(newCachePath).Length;
+                }
+                catch { }
+            }
+
+            bool firstRun = _lastCacheCleanupTime == DateTime.MinValue;
+            bool enoughTimePassed = (DateTime.UtcNow - _lastCacheCleanupTime).TotalSeconds >= 60;
+            bool enoughDataAdded = _cacheBytesSinceCleanup >= 16L * 1024 * 1024;
+            if (!firstRun && !enoughTimePassed && !enoughDataAdded) return;
+
+            CleanupCache();
+            _lastCacheCleanupTime = DateTime.UtcNow;
+            _cacheBytesSinceCleanup = 0;
         }
 
         /// <summary>清空全部 TTS 缓存</summary>
@@ -679,8 +703,7 @@ namespace ExpressPackingMonitoring.Services
                                 }
                             }
                         }
-                        if (TtsCacheMaxSizeMB > 0)
-                            CleanupCache();
+                        RequestCacheCleanup(cachePath);
                     }
                     catch (Exception ex)
                     {

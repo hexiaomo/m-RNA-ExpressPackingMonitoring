@@ -52,6 +52,12 @@ namespace ExpressPackingMonitoring
         public string Reason { get; set; } = "";
     }
 
+    public class PagedVideoResult
+    {
+        public int Total { get; set; }
+        public List<VideoRecord> Records { get; set; } = new();
+    }
+
     /// <summary>
     /// 本地 SQLite 视频数据库，统一管理录制记录、统计数据和删除日志。
     /// 替代原来的 daily_stats.json 和文件系统扫描。
@@ -111,6 +117,7 @@ namespace ExpressPackingMonitoring
             ExecuteNonQuery("CREATE INDEX IF NOT EXISTS idx_video_starttime ON VideoRecords(StartTime);");
             ExecuteNonQuery("CREATE INDEX IF NOT EXISTS idx_video_filepath ON VideoRecords(FilePath);");
             ExecuteNonQuery("CREATE INDEX IF NOT EXISTS idx_video_isdeleted ON VideoRecords(IsDeleted);");
+            ExecuteNonQuery("CREATE INDEX IF NOT EXISTS idx_video_active_starttime ON VideoRecords(IsDeleted, StartTime DESC);");
 
             EnsureColumnExists("VideoRecords", "VideoCodec", "TEXT DEFAULT ''");
             EnsureColumnExists("VideoRecords", "VideoEncoder", "TEXT DEFAULT ''");
@@ -382,6 +389,80 @@ namespace ExpressPackingMonitoring
                     });
                 }
                 return results;
+            }
+        }
+
+        private static VideoRecord ReadVideoRecord(SqliteDataReader reader)
+        {
+            return new VideoRecord
+            {
+                Id = reader.GetInt64(0),
+                OrderId = reader.GetString(1),
+                Mode = reader.GetString(2),
+                VideoCodec = reader.IsDBNull(3) ? "" : reader.GetString(3),
+                VideoEncoder = reader.IsDBNull(4) ? "" : reader.GetString(4),
+                FilePath = reader.GetString(5),
+                FileName = reader.GetString(6),
+                FileSizeBytes = reader.GetInt64(7),
+                StartTime = DateTime.Parse(reader.GetString(8)),
+                EndTime = reader.IsDBNull(9) ? DateTime.MinValue : DateTime.Parse(reader.GetString(9)),
+                DurationSeconds = reader.GetDouble(10),
+                StopReason = reader.IsDBNull(11) ? "" : reader.GetString(11),
+                IsDeleted = reader.GetInt64(12) == 1,
+                DeletedAt = reader.IsDBNull(13) ? null : DateTime.Parse(reader.GetString(13)),
+                DeleteReason = reader.IsDBNull(14) ? "" : reader.GetString(14)
+            };
+        }
+
+        public PagedVideoResult QueryVideosPaged(DateTime startDate, DateTime endDate, string keyword, int page, int pageSize, bool includeDeleted = false)
+        {
+            page = Math.Max(1, page);
+            pageSize = Math.Clamp(pageSize, 1, 100);
+            int offset = (page - 1) * pageSize;
+
+            lock (_lock)
+            {
+                using var countCmd = _connection.CreateCommand();
+                string whereSql = @"
+                    FROM VideoRecords
+                    WHERE StartTime >= @startDate
+                      AND StartTime < @endDate";
+
+                if (!includeDeleted)
+                    whereSql += " AND IsDeleted = 0";
+
+                if (!string.IsNullOrWhiteSpace(keyword))
+                {
+                    whereSql += " AND (OrderId LIKE @keyword OR FileName LIKE @keyword)";
+                    countCmd.Parameters.AddWithValue("@keyword", $"%{keyword}%");
+                }
+
+                countCmd.CommandText = "SELECT COUNT(1) " + whereSql + ";";
+                countCmd.Parameters.AddWithValue("@startDate", startDate.ToString("yyyy-MM-dd 00:00:00"));
+                countCmd.Parameters.AddWithValue("@endDate", endDate.AddDays(1).ToString("yyyy-MM-dd 00:00:00"));
+                int total = Convert.ToInt32(countCmd.ExecuteScalar());
+
+                using var cmd = _connection.CreateCommand();
+                cmd.CommandText = @"
+                    SELECT Id, OrderId, Mode, VideoCodec, VideoEncoder, FilePath, FileName, FileSizeBytes,
+                           StartTime, EndTime, DurationSeconds, StopReason,
+                           IsDeleted, DeletedAt, DeleteReason "
+                    + whereSql + @"
+                    ORDER BY StartTime DESC
+                    LIMIT @limit OFFSET @offset;";
+                cmd.Parameters.AddWithValue("@startDate", startDate.ToString("yyyy-MM-dd 00:00:00"));
+                cmd.Parameters.AddWithValue("@endDate", endDate.AddDays(1).ToString("yyyy-MM-dd 00:00:00"));
+                cmd.Parameters.AddWithValue("@limit", pageSize);
+                cmd.Parameters.AddWithValue("@offset", offset);
+                if (!string.IsNullOrWhiteSpace(keyword))
+                    cmd.Parameters.AddWithValue("@keyword", $"%{keyword}%");
+
+                var records = new List<VideoRecord>(pageSize);
+                using var reader = cmd.ExecuteReader();
+                while (reader.Read())
+                    records.Add(ReadVideoRecord(reader));
+
+                return new PagedVideoResult { Total = total, Records = records };
             }
         }
 

@@ -84,6 +84,12 @@ namespace ExpressPackingMonitoring.ViewModels
         private long _audioGapPaddingBytes;
 
         private Mat _previousCheckFrame = new Mat();
+        private readonly Mat _motionCurrentSmall = new Mat();
+        private readonly Mat _motionPreviousSmall = new Mat();
+        private readonly Mat _motionCurrentGray = new Mat();
+        private readonly Mat _motionPreviousGray = new Mat();
+        private readonly Mat _motionDiff = new Mat();
+        private readonly Mat _motionThreshold = new Mat();
         private BitmapSource _videoFrame;
         private CancellationTokenSource _cts;
 
@@ -1238,11 +1244,34 @@ namespace ExpressPackingMonitoring.ViewModels
 
         private Mat BitmapToMat(Bitmap bitmap)
         {
-            Bitmap solidBitmap = new Bitmap(bitmap.Width, bitmap.Height, PixelFormat.Format24bppRgb);
-            using (Graphics gr = Graphics.FromImage(solidBitmap)) gr.DrawImage(bitmap, new System.Drawing.Rectangle(0, 0, solidBitmap.Width, solidBitmap.Height));
-            var bmpData = solidBitmap.LockBits(new System.Drawing.Rectangle(0, 0, solidBitmap.Width, solidBitmap.Height), ImageLockMode.ReadOnly, solidBitmap.PixelFormat);
-            Mat mat = Mat.FromPixelData(solidBitmap.Height, solidBitmap.Width, MatType.CV_8UC3, bmpData.Scan0, bmpData.Stride).Clone();
-            solidBitmap.UnlockBits(bmpData); solidBitmap.Dispose(); return mat;
+            if (bitmap.PixelFormat == PixelFormat.Format24bppRgb)
+            {
+                var rect = new System.Drawing.Rectangle(0, 0, bitmap.Width, bitmap.Height);
+                var bmpData = bitmap.LockBits(rect, ImageLockMode.ReadOnly, bitmap.PixelFormat);
+                try
+                {
+                    return Mat.FromPixelData(bitmap.Height, bitmap.Width, MatType.CV_8UC3, bmpData.Scan0, bmpData.Stride).Clone();
+                }
+                finally
+                {
+                    bitmap.UnlockBits(bmpData);
+                }
+            }
+
+            using var solidBitmap = new Bitmap(bitmap.Width, bitmap.Height, PixelFormat.Format24bppRgb);
+            using (Graphics gr = Graphics.FromImage(solidBitmap))
+                gr.DrawImage(bitmap, new System.Drawing.Rectangle(0, 0, solidBitmap.Width, solidBitmap.Height));
+
+            var solidRect = new System.Drawing.Rectangle(0, 0, solidBitmap.Width, solidBitmap.Height);
+            var solidData = solidBitmap.LockBits(solidRect, ImageLockMode.ReadOnly, solidBitmap.PixelFormat);
+            try
+            {
+                return Mat.FromPixelData(solidBitmap.Height, solidBitmap.Width, MatType.CV_8UC3, solidData.Scan0, solidData.Stride).Clone();
+            }
+            finally
+            {
+                solidBitmap.UnlockBits(solidData);
+            }
         }
 
         private async Task VideoProcessLoop(CancellationToken token)
@@ -1419,39 +1448,24 @@ namespace ExpressPackingMonitoring.ViewModels
                             catch { }
                         }
 
-                        if (IsRecording && _videoWriteQueue != null && !_videoWriteQueue.IsAddingCompleted)
-                        {
-                            // === 防熔断检查机制 ===
-                            // 如果后台任务意外报错结束，绝对不要继续往队列塞数据
-                            if (_writeTask != null && _writeTask.IsCompleted)
-                            {
-                                // 这种情况下不应该继续填充队列
-                                continue;
-                            }
-
-                            try
-                            {
-                                var clone = processedFrame.Clone();
-                                // === 防卡死核心机制 ===
-                                // 给队列的塞入设定 5ms 极限超时。如果 5ms 放不进去，证明后台卡住了。
-                                // 此时宁可抛弃这一帧，也绝对不能让当前的 UI/预览线程被挂起！
-                                var queue = _videoWriteQueue;
-                                if (queue != null && !queue.IsAddingCompleted && !queue.TryAdd(clone, 5))
-                                {
-                                    clone.Dispose();
-                                }
-                            }
-                            catch { } // 忽略对象被清理时的异常
-                        }
-
                         var bitmap = processedFrame.ToWriteableBitmap();
                         bitmap.Freeze();
                         _ = Application.Current.Dispatcher.BeginInvoke(new Action(() => { 
                             if (_isDisposed) return;
                             VideoFrame = bitmap; 
                         }));
-                    if (frameTickCounter % 30 == 0) PerformMotionDetection(currentFrame);
-                        if (processedFrame != currentFrame) processedFrame.Dispose(); currentFrame.Dispose();
+                        if (frameTickCounter % 30 == 0) PerformMotionDetection(currentFrame);
+
+                        bool handedToRecorder = IsRecording && TryEnqueueFrameForRecording(processedFrame);
+                        if (processedFrame != currentFrame)
+                        {
+                            if (!handedToRecorder) processedFrame.Dispose();
+                            currentFrame.Dispose();
+                        }
+                        else if (!handedToRecorder)
+                        {
+                            currentFrame.Dispose();
+                        }
                     }
                     else
                     {
@@ -1596,13 +1610,32 @@ namespace ExpressPackingMonitoring.ViewModels
         private void PerformMotionDetection(Mat currentFrame)
         {
             if (_previousCheckFrame.Empty()) { currentFrame.CopyTo(_previousCheckFrame); _lastMotionTime = DateTime.Now; return; }
-            using var cGray = currentFrame.Resize(new OpenCvSharp.Size(320, 240)).CvtColor(ColorConversionCodes.BGR2GRAY);
-            using var pGray = _previousCheckFrame.Resize(new OpenCvSharp.Size(320, 240)).CvtColor(ColorConversionCodes.BGR2GRAY);
-            using var diff = new Mat(); using var thresh = new Mat();
-            Cv2.Absdiff(cGray, pGray, diff); Cv2.Threshold(diff, thresh, Config.MotionDetectThreshold, 255, ThresholdTypes.Binary);
-            double changeRatio = (double)Cv2.CountNonZero(thresh) / (thresh.Width * thresh.Height);
+            var motionSize = new OpenCvSharp.Size(320, 240);
+            Cv2.Resize(currentFrame, _motionCurrentSmall, motionSize);
+            Cv2.Resize(_previousCheckFrame, _motionPreviousSmall, motionSize);
+            Cv2.CvtColor(_motionCurrentSmall, _motionCurrentGray, ColorConversionCodes.BGR2GRAY);
+            Cv2.CvtColor(_motionPreviousSmall, _motionPreviousGray, ColorConversionCodes.BGR2GRAY);
+            Cv2.Absdiff(_motionCurrentGray, _motionPreviousGray, _motionDiff);
+            Cv2.Threshold(_motionDiff, _motionThreshold, Config.MotionDetectThreshold, 255, ThresholdTypes.Binary);
+            double changeRatio = (double)Cv2.CountNonZero(_motionThreshold) / (_motionThreshold.Width * _motionThreshold.Height);
             if (changeRatio > 0.01) { _lastMotionTime = DateTime.Now; }
             currentFrame.CopyTo(_previousCheckFrame);
+        }
+
+        private bool TryEnqueueFrameForRecording(Mat frame)
+        {
+            try
+            {
+                if (frame == null || frame.IsDisposed) return false;
+                if (_writeTask != null && _writeTask.IsCompleted) return false;
+
+                var queue = _videoWriteQueue;
+                return queue != null && !queue.IsAddingCompleted && queue.TryAdd(frame, 5);
+            }
+            catch
+            {
+                return false;
+            }
         }
 
 
@@ -1681,7 +1714,16 @@ namespace ExpressPackingMonitoring.ViewModels
             StopCamera();
             try { _videoTask?.Wait(1000); } catch { }
             _cts?.Dispose();
-            lock (_videoLock) { _previousCheckFrame?.Dispose(); }
+            lock (_videoLock)
+            {
+                _previousCheckFrame?.Dispose();
+                _motionCurrentSmall?.Dispose();
+                _motionPreviousSmall?.Dispose();
+                _motionCurrentGray?.Dispose();
+                _motionPreviousGray?.Dispose();
+                _motionDiff?.Dispose();
+                _motionThreshold?.Dispose();
+            }
             _speechService?.Dispose();
             _speechService = null;
             try { _globalKeyHook?.Dispose(); } catch { }

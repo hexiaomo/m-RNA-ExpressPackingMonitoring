@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 
@@ -11,15 +12,40 @@ namespace ExpressPackingMonitoring.ViewModels
     {
         private void ForceCheckDiskAndCleanup()
         {
-            Task.Run(() =>
+            _ = Task.Run(() => RunDiskCleanupCore(forceFullScan: true));
+        }
+
+        private async Task CheckDiskAndCleanup()
+        {
+            while (!_cts.Token.IsCancellationRequested)
             {
-                try
+                RunDiskCleanupCore(forceFullScan: false);
+                int interval = IsRecording ? 10000 : 60000;
+                try { await Task.Delay(interval, _cts.Token); } catch { break; }
+            }
+        }
+
+        private int _diskCleanupRunning;
+        private DateTime _lastFullDiskCleanup = DateTime.MinValue;
+        private long _lastKnownDiskTotalBytes;
+        private long _lastKnownDiskQuotaBytes;
+
+        private void RunDiskCleanupCore(bool forceFullScan)
+        {
+            if (Interlocked.Exchange(ref _diskCleanupRunning, 1) == 1) return;
+            try
+            {
+                if (Config.StorageLocations == null || Config.StorageLocations.Count == 0) return;
+
+                bool fullScan = forceFullScan
+                    || _lastFullDiskCleanup == DateTime.MinValue
+                    || (DateTime.Now - _lastFullDiskCleanup).TotalSeconds >= (IsRecording ? 60 : 180);
+
+                long totalCurrentBytes = fullScan ? 0 : _lastKnownDiskTotalBytes;
+                long totalConfigQuotaBytes = fullScan ? 0 : _lastKnownDiskQuotaBytes;
+
+                if (fullScan)
                 {
-                    if (Config.StorageLocations == null || Config.StorageLocations.Count == 0) return;
-
-                    long totalCurrentBytes = 0;
-                    long totalConfigQuotaBytes = 0;
-
                     foreach (var loc in Config.StorageLocations)
                     {
                         if (string.IsNullOrWhiteSpace(loc.Path)) continue;
@@ -40,7 +66,6 @@ namespace ExpressPackingMonitoring.ViewModels
                                 var driveInfo = new DriveInfo(driveRoot);
                                 if (driveInfo.IsReady)
                                 {
-                                    // 磁盘实际可供本目录使用的上限 = 当前剩余空间 + 该目录已用视频空间
                                     long realCapacity = driveInfo.AvailableFreeSpace + locVideoBytes;
                                     configQuota = Math.Min(configQuota, realCapacity);
                                 }
@@ -50,101 +75,105 @@ namespace ExpressPackingMonitoring.ViewModels
                         totalConfigQuotaBytes += configQuota;
                     }
 
-                    if (IsRecording && !string.IsNullOrEmpty(_currentVideoFilePath))
-                    {
-                        try
-                        {
-                            if (File.Exists(_currentVideoFilePath))
-                                totalCurrentBytes += new FileInfo(_currentVideoFilePath).Length;
-                        }
-                        catch { }
-                    }
+                    _lastFullDiskCleanup = DateTime.Now;
+                    _lastKnownDiskTotalBytes = totalCurrentBytes;
+                    _lastKnownDiskQuotaBytes = totalConfigQuotaBytes;
+                }
 
-                    // 2. 判断是否溢出
-                    if (totalConfigQuotaBytes > 0 && totalCurrentBytes > totalConfigQuotaBytes)
-                    {
-                        long bytesToRelease = totalCurrentBytes - (long)(totalConfigQuotaBytes * 0.9);
-                        long releasedBytes = 0;
-                        int count = 0;
-
-                        var oldestRecords = _db?.GetOldestVideos(500);
-                        if (oldestRecords != null)
-                        {
-                            foreach (var video in oldestRecords)
-                            {
-                                try
-                                {
-                                    if (File.Exists(video.FilePath))
-                                    {
-                                        long size = new FileInfo(video.FilePath).Length;
-                                        File.Delete(video.FilePath);
-                                        releasedBytes += size;
-                                        count++;
-                                    }
-                                    _db?.MarkVideoDeleted(video.FilePath, "全局配额清理");
-                                    if (releasedBytes >= bytesToRelease) break;
-                                }
-                                catch { }
-                            }
-                        }
-
-                        if (count > 0)
-                        {
-                            _ = Application.Current.Dispatcher.InvokeAsync(() =>
-                            {
-                                if (_isDisposed) return;
-                                ShowToast($"🗑 磁盘清理: 已从多盘回收 {count} 个旧视频");
-                                RefreshTodayStats();
-                            });
-                        }
-                    }
-
-                    double totalUsedGB = totalCurrentBytes / 1073741824.0;
-                    double totalQuotaGB = totalConfigQuotaBytes / 1073741824.0;
-
-                    // 根据历史录制数据估算剩余可录制时长
-                    string estimateText = "";
+                if (IsRecording && !string.IsNullOrEmpty(_currentVideoFilePath))
+                {
                     try
                     {
-                        var (dbTotalBytes, dbTotalSec) = _db?.GetGlobalSizeAndDuration() ?? (0, 0);
-                        if (dbTotalBytes > 0 && dbTotalSec > 0)
-                        {
-                            double bytesPerSec = dbTotalBytes / dbTotalSec;
-                            long remainingBytes = totalConfigQuotaBytes - totalCurrentBytes;
-                            if (remainingBytes > 0)
-                            {
-                                double remainingHours = remainingBytes / bytesPerSec / 3600.0;
-                                estimateText = remainingHours >= 1
-                                    ? $"，预估可录 {remainingHours:F0} 小时"
-                                    : $"，预估可录 {remainingHours * 60:F0} 分钟";
-                            }
-                            else
-                            {
-                                estimateText = "，空间已满";
-                            }
-                        }
+                        if (File.Exists(_currentVideoFilePath))
+                            totalCurrentBytes += new FileInfo(_currentVideoFilePath).Length;
                     }
                     catch { }
-
-                    _ = Application.Current.Dispatcher.InvokeAsync(() =>
-                    {
-                        if (_isDisposed) return;
-                        DiskUsagePercent = totalQuotaGB > 0 ? Math.Min(100.0, (totalUsedGB / totalQuotaGB) * 100.0) : 0;
-                        DiskUsageText = $"{totalUsedGB:F1} / {totalQuotaGB:F1} GB{estimateText}";
-                    });
                 }
-                catch { }
-            });
+
+                if (fullScan && totalConfigQuotaBytes > 0 && totalCurrentBytes > totalConfigQuotaBytes)
+                    CleanupOldVideos(totalCurrentBytes, totalConfigQuotaBytes);
+
+                UpdateDiskUsageText(totalCurrentBytes, totalConfigQuotaBytes);
+            }
+            catch { }
+            finally
+            {
+                Interlocked.Exchange(ref _diskCleanupRunning, 0);
+            }
         }
 
-        private async Task CheckDiskAndCleanup() 
-        { 
-            while (!_cts.Token.IsCancellationRequested) 
-            { 
-                ForceCheckDiskAndCleanup(); 
-                int interval = IsRecording ? 10000 : 60000; 
-                try { await Task.Delay(interval, _cts.Token); } catch { break; }
-            } 
+        private void CleanupOldVideos(long totalCurrentBytes, long totalConfigQuotaBytes)
+        {
+            long bytesToRelease = totalCurrentBytes - (long)(totalConfigQuotaBytes * 0.9);
+            long releasedBytes = 0;
+            int count = 0;
+
+            var oldestRecords = _db?.GetOldestVideos(500);
+            if (oldestRecords != null)
+            {
+                foreach (var video in oldestRecords)
+                {
+                    try
+                    {
+                        if (File.Exists(video.FilePath))
+                        {
+                            long size = new FileInfo(video.FilePath).Length;
+                            File.Delete(video.FilePath);
+                            releasedBytes += size;
+                            count++;
+                        }
+                        _db?.MarkVideoDeleted(video.FilePath, "全局配额清理");
+                        if (releasedBytes >= bytesToRelease) break;
+                    }
+                    catch { }
+                }
+            }
+
+            if (count > 0)
+            {
+                _lastKnownDiskTotalBytes = Math.Max(0, _lastKnownDiskTotalBytes - releasedBytes);
+                _ = Application.Current.Dispatcher.InvokeAsync(() =>
+                {
+                    if (_isDisposed) return;
+                    ShowToast($"🗑 磁盘清理: 已从多盘回收 {count} 个旧视频");
+                    RefreshTodayStats();
+                });
+            }
+        }
+
+        private void UpdateDiskUsageText(long totalCurrentBytes, long totalConfigQuotaBytes)
+        {
+            double totalUsedGB = totalCurrentBytes / 1073741824.0;
+            double totalQuotaGB = totalConfigQuotaBytes / 1073741824.0;
+            string estimateText = "";
+            try
+            {
+                var (dbTotalBytes, dbTotalSec) = _db?.GetGlobalSizeAndDuration() ?? (0, 0);
+                if (dbTotalBytes > 0 && dbTotalSec > 0)
+                {
+                    double bytesPerSec = dbTotalBytes / dbTotalSec;
+                    long remainingBytes = totalConfigQuotaBytes - totalCurrentBytes;
+                    if (remainingBytes > 0)
+                    {
+                        double remainingHours = remainingBytes / bytesPerSec / 3600.0;
+                        estimateText = remainingHours >= 1
+                            ? $"，预计可录 {remainingHours:F0} 小时"
+                            : $"，预计可录 {remainingHours * 60:F0} 分钟";
+                    }
+                    else
+                    {
+                        estimateText = "，空间已满";
+                    }
+                }
+            }
+            catch { }
+
+            _ = Application.Current.Dispatcher.InvokeAsync(() =>
+            {
+                if (_isDisposed) return;
+                DiskUsagePercent = totalQuotaGB > 0 ? Math.Min(100.0, (totalUsedGB / totalQuotaGB) * 100.0) : 0;
+                DiskUsageText = $"{totalUsedGB:F1} / {totalQuotaGB:F1} GB{estimateText}";
+            });
         }
 
         private static readonly string[] _videoExtensions = [".mkv", ".mp4"];

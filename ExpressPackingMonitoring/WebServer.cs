@@ -443,12 +443,9 @@ namespace ExpressPackingMonitoring
             int page = int.TryParse(qs["page"], out var p) ? Math.Max(1, p) : 1;
             int pageSize = int.TryParse(qs["size"], out var s) ? Math.Clamp(s, 1, 100) : 50;
 
-            var allRecords = _db.QueryVideos(startDate, endDate, string.IsNullOrWhiteSpace(keyword) ? null : keyword);
-            // 只返回未删除且文件存在的
-            var valid = allRecords.Where(r => !r.IsDeleted).ToList();
-
-            int total = valid.Count;
-            var paged = valid.Skip((page - 1) * pageSize).Take(pageSize).Select(r => new
+            var result = _db.QueryVideosPaged(startDate, endDate, string.IsNullOrWhiteSpace(keyword) ? null : keyword, page, pageSize);
+            // SQL 层只取当前页，文件存在性仅对当前页记录检查。
+            var paged = result.Records.Select(r => new
             {
                 r.Id,
                 r.OrderId,
@@ -462,7 +459,7 @@ namespace ExpressPackingMonitoring
                 exists = File.Exists(r.FilePath)
             });
 
-            SendJson(ctx, 200, new { total, page, pageSize, data = paged });
+            SendJson(ctx, 200, new { total = result.Total, page, pageSize, data = paged });
         }
 
         // ───── API: 流式播放 (支持 Range) ─────
