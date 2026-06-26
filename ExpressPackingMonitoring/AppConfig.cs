@@ -93,7 +93,7 @@ namespace ExpressPackingMonitoring.ViewModels
         public int VideoCqp { get; set; } = 30;
 
         // 全局键盘监听（后台接收扫码枪）
-        public bool EnableGlobalKeyboard { get; set; } = false;
+        public bool EnableGlobalKeyboard { get; set; } = true;
 
         // 水印
         public bool EnableWatermark { get; set; } = true;
@@ -110,7 +110,7 @@ namespace ExpressPackingMonitoring.ViewModels
         public int AiTtsWarningSpeakerId { get; set; } = 50;  // 警告播报声线
         public float AiTtsSpeed { get; set; } = 1.0f;
         public string EdgeTtsVoice { get; set; } = "zh-CN-XiaoxiaoNeural";
-        public string EdgeTtsWarningVoice { get; set; } = "zh-CN-YunxiNeural";
+        public string EdgeTtsWarningVoice { get; set; } = "zh-CN-YunjianNeural";
 
         // 订单信息播报（快递助手联动）
         public bool EnableOrderInfoAnnounce { get; set; } = true;
