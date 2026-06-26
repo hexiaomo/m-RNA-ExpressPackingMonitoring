@@ -975,38 +975,10 @@
             </ScrollViewer>
         </TabItem>
 
-            <TabItem Header="高级设置">
+            <TabItem Header="AI 语音">
                 <Border Background="Transparent" Padding="0,4,0,0">
                     <ScrollViewer VerticalScrollBarVisibility="Auto">
                         <StackPanel>
-                            <!-- 水印设置 -->
-                            <Border Style="{StaticResource SectionCardStyle}">
-                                <StackPanel>
-                                    <TextBlock Text="视频水印" Style="{StaticResource SectionTitleStyle}"/>
-                                    <TextBlock Text="在录像画面右上角叠加单号和实时时间戳。"
-                                               Style="{StaticResource SectionHintStyle}"/>
-                                    <Border Height="1" Background="{DynamicResource BorderLight}" Margin="0,12,0,12"/>
-
-                                    <Grid Style="{StaticResource SettingRowStyle}" Margin="0,0,0,0">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="230"/>
-                                            <ColumnDefinition Width="*"/>
-                                        </Grid.ColumnDefinitions>
-                                        <StackPanel Margin="0,0,16,0">
-                                            <TextBlock Text="启用录像水印" Style="{StaticResource FieldLabelStyle}"/>
-                                            <TextBlock Text="在视频右上角叠加当前单号与日期时间。"
-                                                       Style="{StaticResource FieldHintStyle}"/>
-                                        </StackPanel>
-                                        <CheckBox Grid.Column="1"
-                                                  IsChecked="{Binding Config.EnableWatermark}"
-                                                  VerticalAlignment="Center"
-                                                  HorizontalAlignment="Left"
-                                                  Style="{StaticResource ToggleSwitchStyle}"/>
-                                    </Grid>
-                                </StackPanel>
-                            </Border>
-
-                            <!-- AI 语音合成 -->
                             <Border Style="{StaticResource SectionCardStyle}">
                                 <StackPanel>
                                     <TextBlock Text="AI 语音合成" Style="{StaticResource SectionTitleStyle}"/>
@@ -1154,7 +1126,6 @@
 
                                     <Border Height="1" Background="{DynamicResource BorderLight}" Margin="0,8,0,8"/>
 
-                                    <!-- TTS 语音预览 -->
                                     <Grid Style="{StaticResource SettingRowStyle}" Margin="0,0,0,8"
                                           IsEnabled="{Binding IsChecked, ElementName=AiTtsCheckBox, TargetNullValue=False}">
                                         <Grid.RowDefinitions>
@@ -1184,7 +1155,6 @@
 
                                     <Border Height="1" Background="{DynamicResource BorderLight}" Margin="0,4,0,8"/>
 
-                                    <!-- 断句关键词编辑 -->
                                     <Grid Style="{StaticResource SettingRowStyle}" Margin="0,0,0,0"
                                           IsEnabled="{Binding IsChecked, ElementName=AiTtsCheckBox, TargetNullValue=False}">
                                         <Grid.RowDefinitions>
@@ -1199,6 +1169,41 @@
                                         <TextBox x:Name="TtsBreakWordsTextBox" Grid.Row="1" Height="100"
                                                  AcceptsReturn="True" TextWrapping="Wrap"
                                                  VerticalScrollBarVisibility="Auto"/>
+                                    </Grid>
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+                    </ScrollViewer>
+                </Border>
+            </TabItem>
+
+            <TabItem Header="高级设置">
+                <Border Background="Transparent" Padding="0,4,0,0">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                        <StackPanel>
+                            <!-- 水印设置 -->
+                            <Border Style="{StaticResource SectionCardStyle}">
+                                <StackPanel>
+                                    <TextBlock Text="视频水印" Style="{StaticResource SectionTitleStyle}"/>
+                                    <TextBlock Text="在录像画面右上角叠加单号和实时时间戳。"
+                                               Style="{StaticResource SectionHintStyle}"/>
+                                    <Border Height="1" Background="{DynamicResource BorderLight}" Margin="0,12,0,12"/>
+
+                                    <Grid Style="{StaticResource SettingRowStyle}" Margin="0,0,0,0">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="230"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Margin="0,0,16,0">
+                                            <TextBlock Text="启用录像水印" Style="{StaticResource FieldLabelStyle}"/>
+                                            <TextBlock Text="在视频右上角叠加当前单号与日期时间。"
+                                                       Style="{StaticResource FieldHintStyle}"/>
+                                        </StackPanel>
+                                        <CheckBox Grid.Column="1"
+                                                  IsChecked="{Binding Config.EnableWatermark}"
+                                                  VerticalAlignment="Center"
+                                                  HorizontalAlignment="Left"
+                                                  Style="{StaticResource ToggleSwitchStyle}"/>
                                     </Grid>
                                 </StackPanel>
                             </Border>
