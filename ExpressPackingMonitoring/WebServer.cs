@@ -29,7 +29,7 @@ namespace ExpressPackingMonitoring
 
     public sealed class WebServer : IDisposable
     {
-        private readonly HttpListener _listener;
+        private HttpListener _listener;
         private readonly VideoDatabase _db;
         private readonly CancellationTokenSource _cts = new();
         private Task _listenTask;
@@ -50,7 +50,13 @@ namespace ExpressPackingMonitoring
         public int Port { get; }
         public bool EnableOrderInfoLog { get; set; }
 
-        private static void Log(string msg)
+        private void Log(string msg)
+        {
+            if (!EnableOrderInfoLog) return;
+            WriteLog(msg);
+        }
+
+        private static void WriteLog(string msg)
         {
             try
             {
@@ -66,9 +72,15 @@ namespace ExpressPackingMonitoring
             _db = db ?? throw new ArgumentNullException(nameof(db));
             Port = port;
             _transCacheMaxBytes = (long)transCacheMaxMB * 1024 * 1024;
-            _listener = new HttpListener();
-            _listener.Prefixes.Add($"http://+:{port}/");
+            _listener = CreateListener(port);
             LoadOrderInfoCache();
+        }
+
+        private static HttpListener CreateListener(int port)
+        {
+            var listener = new HttpListener();
+            listener.Prefixes.Add($"http://+:{port}/");
+            return listener;
         }
 
         public void Start()
@@ -81,7 +93,16 @@ namespace ExpressPackingMonitoring
             {
                 // URL ACL 未注册，尝试自动注册后重试
                 RegisterUrlAcl(Port);
-                _listener.Start();
+                try { _listener.Close(); } catch { }
+                _listener = CreateListener(Port);
+                try
+                {
+                    _listener.Start();
+                }
+                catch (HttpListenerException ex)
+                {
+                    throw new InvalidOperationException($"Web 服务监听 http://+:{Port}/ 失败，请检查端口占用、URL ACL 或防火墙权限。", ex);
+                }
             }
             _listenTask = Task.Run(() => ListenLoop(_cts.Token));
         }
@@ -92,12 +113,12 @@ namespace ExpressPackingMonitoring
         private static void RegisterUrlAcl(int port)
         {
             string url = $"http://+:{port}/";
-            RunElevatedCmd($"netsh http add urlacl url={url} user=Everyone");
+            RunElevatedCmd($"netsh http add urlacl url={url} user=Everyone", "注册 Web 服务 URL ACL");
             // 同时确保防火墙规则存在
-            RunElevatedCmd($"netsh advfirewall firewall add rule name=\"快递打包监控 Web服务\" dir=in action=allow protocol=TCP localport={port}");
+            RunElevatedCmd($"netsh advfirewall firewall add rule name=\"快递打包监控 Web服务\" dir=in action=allow protocol=TCP localport={port}", "注册 Web 服务防火墙规则");
         }
 
-        private static void RunElevatedCmd(string arguments)
+        private static void RunElevatedCmd(string arguments, string actionName)
         {
             try
             {
@@ -111,9 +132,19 @@ namespace ExpressPackingMonitoring
                     CreateNoWindow = true
                 };
                 var proc = Process.Start(psi);
-                proc?.WaitForExit(5000);
+                if (proc == null)
+                    throw new InvalidOperationException($"{actionName}失败：无法启动管理员命令。");
+
+                if (!proc.WaitForExit(15000))
+                    throw new TimeoutException($"{actionName}超时，请手动以管理员身份运行 netsh 或关闭 Web 服务。");
+
+                if (proc.ExitCode != 0)
+                    throw new InvalidOperationException($"{actionName}失败，netsh 退出码：{proc.ExitCode}。");
             }
-            catch { }
+            catch (Exception ex) when (ex is not InvalidOperationException && ex is not TimeoutException)
+            {
+                throw new InvalidOperationException($"{actionName}失败，可能是用户取消了管理员授权或系统拒绝执行。", ex);
+            }
         }
 
         private async Task ListenLoop(CancellationToken token)
@@ -139,8 +170,7 @@ namespace ExpressPackingMonitoring
                 string method = ctx.Request.HttpMethod;
                 Log($">>> {method} {path} from {ctx.Request.RemoteEndPoint}");
 
-                // CORS
-                ctx.Response.Headers.Add("Access-Control-Allow-Origin", "*");
+                ApplyCorsHeaders(ctx);
                 ctx.Response.Headers.Add("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
                 ctx.Response.Headers.Add("Access-Control-Allow-Headers", "Content-Type");
 
@@ -188,6 +218,55 @@ namespace ExpressPackingMonitoring
                 Log($"!!! HandleRequest 异常: {ex}");
                 try { SendJson(ctx, 500, new { error = ex.Message }); } catch { }
             }
+        }
+
+        private static void ApplyCorsHeaders(HttpListenerContext ctx)
+        {
+            string origin = ctx.Request.Headers["Origin"];
+            if (string.IsNullOrWhiteSpace(origin)) return;
+            if (!IsAllowedCorsOrigin(origin)) return;
+
+            ctx.Response.Headers["Access-Control-Allow-Origin"] = origin;
+            ctx.Response.Headers["Vary"] = "Origin";
+        }
+
+        private static bool IsAllowedCorsOrigin(string origin)
+        {
+            if (!Uri.TryCreate(origin, UriKind.Absolute, out var uri))
+                return false;
+            if (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps)
+                return false;
+
+            string host = uri.Host;
+            if (host.Equals("localhost", StringComparison.OrdinalIgnoreCase) ||
+                host.Equals("127.0.0.1", StringComparison.OrdinalIgnoreCase) ||
+                host.Equals("::1", StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            if (host.Equals("kuaidizs.cn", StringComparison.OrdinalIgnoreCase) ||
+                host.EndsWith(".kuaidizs.cn", StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            if (IPAddress.TryParse(host, out var ip))
+                return IsPrivateAddress(ip);
+
+            return false;
+        }
+
+        private static bool IsPrivateAddress(IPAddress ip)
+        {
+            if (IPAddress.IsLoopback(ip)) return true;
+
+            byte[] bytes = ip.GetAddressBytes();
+            if (ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
+            {
+                return bytes[0] == 10 ||
+                       (bytes[0] == 172 && bytes[1] >= 16 && bytes[1] <= 31) ||
+                       (bytes[0] == 192 && bytes[1] == 168) ||
+                       (bytes[0] == 169 && bytes[1] == 254);
+            }
+
+            return ip.IsIPv6LinkLocal || ip.IsIPv6SiteLocal || ip.IsIPv6UniqueLocal;
         }
 
         // ───── API: 推送订单信息 (来自油猴脚本) ─────
@@ -461,7 +540,7 @@ namespace ExpressPackingMonitoring
         /// 启动 FFmpeg，将 stdout 同时推送给浏览器和写入缓存文件。
         /// 返回 true 表示 FFmpeg 正常退出且数据已发送。
         /// </summary>
-        private static bool StreamTranscodeToClient(HttpListenerContext ctx, string ffmpegPath, string args, string tmpPath)
+        private bool StreamTranscodeToClient(HttpListenerContext ctx, string ffmpegPath, string args, string tmpPath)
         {
             Log($"StreamTranscodeToClient: {args}");
             var psi = new ProcessStartInfo
@@ -572,7 +651,7 @@ namespace ExpressPackingMonitoring
         }
 
         // ───── 运行 FFmpeg 转码，返回是否成功 ─────
-        private static bool TryRunFFmpeg(string ffmpegPath, string args, string outputPath)
+        private bool TryRunFFmpeg(string ffmpegPath, string args, string outputPath)
         {
             Log($"TryRunFFmpeg: {args}");
             try

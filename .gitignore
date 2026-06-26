@@ -1,9 +1,31 @@
-.vs/*
-ExpressPackingMonitoring/bin/*
-ExpressPackingMonitoring/obj/*
+.vs/
+.vscode/*.user
 *.user
+ExpressPackingMonitoring/bin/
+ExpressPackingMonitoring/obj/
+ExpressPackingMonitoring/bin_publish_tmp/
+ExpressPackingMonitoring/obj_publish_tmp/
+ExpressPackingMonitoring/publish-test/
+ExpressPackingMonitoring/publish-size-*/
 ExpressPackingMonitoring/ffmpeg.exe
+
+# Local runtime state and diagnostic artifacts
+ExpressPackingMonitoring/*.log
+ExpressPackingMonitoring/*.audio.log
+ExpressPackingMonitoring/audio_probe*.wav
+ExpressPackingMonitoring/audio_probe*.mkv
+ExpressPackingMonitoring/audio_probe*.mp4
+ExpressPackingMonitoring/audio_probe*_decoded.wav
+ExpressPackingMonitoring/config.json
+ExpressPackingMonitoring/videos.db*
+ExpressPackingMonitoring/orderinfo_cache.json
+ExpressPackingMonitoring/tts_cache/
+ExpressPackingMonitoring/transcache/
 
 Test/
 
 kokoro-multi-lang-v1_0/
+kokoro-multi-lang-v1_0.tar.bz2
+
+# Local screenshots captured during manual testing
+Image/PixPin_*.png
