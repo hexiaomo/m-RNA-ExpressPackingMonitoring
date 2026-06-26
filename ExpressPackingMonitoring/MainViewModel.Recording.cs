@@ -218,15 +218,6 @@ namespace ExpressPackingMonitoring.ViewModels
                     // 检查写入权限
                     if (!IsDirectoryWritable(normalizedPath)) continue;
 
-                    long usedBytesInPath = 0;
-                    var dirInfo = new DirectoryInfo(normalizedPath);
-                    foreach (var file in dirInfo.EnumerateFiles("*.mkv", SearchOption.AllDirectories))
-                    {
-                        usedBytesInPath += file.Length;
-                    }
-
-                    double usedGB = usedBytesInPath / 1073741824.0;
-
                     string? root = Path.GetPathRoot(Path.GetFullPath(normalizedPath));
                     if (string.IsNullOrEmpty(root)) continue;
 
@@ -236,7 +227,7 @@ namespace ExpressPackingMonitoring.ViewModels
                     // 5% 预留或 2GB
                     long safeBuffer = (long)Math.Max(2147483648, drive.TotalSize * 0.05);
 
-                    if (usedGB < loc.QuotaGB && drive.AvailableFreeSpace > safeBuffer)
+                    if (drive.AvailableFreeSpace > safeBuffer)
                     {
                         return normalizedPath;
                     }
@@ -285,6 +276,7 @@ namespace ExpressPackingMonitoring.ViewModels
 
         private async Task InternalStartRecordingAsync()
         {
+            var startupWatch = Stopwatch.StartNew();
             IsBusy = true;
             BusyText = "正在启动...";
 
@@ -305,22 +297,10 @@ namespace ExpressPackingMonitoring.ViewModels
                     }
                 }
 
-                if (Config.EnableAudioRecording && HasConfiguredAudioDevice())
-                {
-                    bool micFound = await Task.Run(() => ResolveAudioEndpoint() != null);
-                    if (!micFound)
-                    {
-                        ShowToast("⚠ 预设麦克风已断开");
-                        SpeakWarning("麦克风已断开");
-                        // 如果用户开了音频录制但麦克风丢了，建议停止或报错。
-                        // 此处选择提示后继续，但 FFmpeg 启动会失败，报错提示更详细。
-                        // 或者可以强制关闭本段录制的音频：
-                        // withAudioOverride = false; 
-                    }
-                }
+                bool startAudioAfterVideo = Config.EnableAudioRecording && HasConfiguredAudioDevice();
 
                 // 1. 彻底清理环境：如果系统残留了任何挂死的 ffmpeg，全部清掉
-                await Task.Run(() => {
+                _ = Task.Run(() => {
                     try {
                         foreach (var p in Process.GetProcessesByName("ffmpeg")) 
                         {
@@ -387,21 +367,37 @@ namespace ExpressPackingMonitoring.ViewModels
                 }
 
                 // 4. 启动录制任务
+                _recordingStartTimestamp = Stopwatch.GetTimestamp();
+                _firstRecordingFrameWritten = new TaskCompletionSource<long>(TaskCreationOptions.RunContinuationsAsynchronously);
                 _writeTask = Task.Run(() => BackgroundFFmpegRecordingLoop(filePath, ffmpegPath, _writeCts.Token));
 
-                // 5. 等待较长时间给 FFmpeg 初始化，特别是 NVENC。
-                // 如果闪退，Task 会立刻完成
-                await Task.Delay(1000); 
+                IsRecording = true;
+                _recordStartTime = DateTime.Now;
+                EnqueueLatestFrameForRecording();
+                _lastMotionTime = DateTime.Now;
+                _autoStopWarned = false;
+                _maxDurationWarned = false;
+                _previousCheckFrame?.Dispose();
+                _previousCheckFrame = new Mat();
+
+                // 5. 快速确认首帧是否已经写入 FFmpeg，避免固定等待拖慢开录。
+                var firstFrameTask = _firstRecordingFrameWritten.Task;
+                var startupCheck = await Task.WhenAny(firstFrameTask, _writeTask, Task.Delay(200));
+                if (startupCheck == firstFrameTask)
+                    Debug.WriteLine($"[RecordingStartup] first frame written in {firstFrameTask.Result} ms (total {startupWatch.ElapsedMilliseconds} ms)");
+                else if (startupCheck != _writeTask)
+                    Debug.WriteLine($"[RecordingStartup] first frame not confirmed within 200 ms (total {startupWatch.ElapsedMilliseconds} ms)");
                 if (_writeTask.IsCompleted) 
                 {
                     DeleteAudioTempFile(StopAudioRecording());
                     ClearCurrentAudioLogPath(audioLogPath);
+                    IsRecording = false;
                     Debug.WriteLine("[MainVM] 启动检测：_writeTask 已结束，FFmpeg 启动失败");
-                    // 注意：此处不应手动 IsRecording = false，BackgroundFFmpegRecordingLoop 内部会处理 UI 状态重置。
+                    // 启动阶段已经提前进入录制状态，失败时要回滚 UI 状态。
                     return; 
                 }
 
-                if (Config.EnableAudioRecording && HasConfiguredAudioDevice())
+                if (startAudioAfterVideo)
                 {
                     WriteAudioDiagnostic($"准备启动麦克风录制: name={Config.AudioDeviceName}, moniker={(string.IsNullOrWhiteSpace(Config.AudioDeviceMoniker) ? "(empty)" : Config.AudioDeviceMoniker)}");
                     if (!StartAudioRecording(audioFilePath))
@@ -419,20 +415,12 @@ namespace ExpressPackingMonitoring.ViewModels
                             await Task.WhenAny(_writeTask, Task.Delay(3000));
                         }
                         catch { }
+                        IsRecording = false;
                         try { if (File.Exists(filePath)) File.Delete(filePath); } catch { }
                         ClearCurrentAudioLogPath(audioLogPath);
                         return;
                     }
                 }
-
-                IsRecording = true;
-                _recordStartTime = DateTime.Now;
-                EnqueueLatestFrameForRecording();
-                _lastMotionTime = DateTime.Now;
-                _autoStopWarned = false;
-                _maxDurationWarned = false;
-                _previousCheckFrame?.Dispose();
-                _previousCheckFrame = new Mat();
 
                 // 6. 在数据库中创建记录占位符
                 _currentRecordId = _db?.InsertVideoRecord(_recordingOrderId, _recordingMode, _currentVideoCodec, _currentVideoEncoder, filePath, _recordStartTime) ?? 0;
@@ -581,7 +569,7 @@ namespace ExpressPackingMonitoring.ViewModels
 
                 var stderrTask = Task.Run(() => { try { return ffmpeg.StandardError.ReadToEnd(); } catch { return ""; } });
 
-                for (int wait = 0; wait < 150 && !ffmpeg.HasExited; wait += 30)
+                for (int wait = 0; wait < 30 && !ffmpeg.HasExited; wait += 30)
                     Thread.Sleep(30);
                 if (ffmpeg.HasExited)
                 {
@@ -634,6 +622,12 @@ namespace ExpressPackingMonitoring.ViewModels
                                 // 此处可能会抛出 IOException/InvalidOperationException，标志着管道断开
                                 stdin.Write(buffer, 0, expectedBytes);
                                 anyFrameWritten = true;
+                                var firstFrameSignal = _firstRecordingFrameWritten;
+                                if (firstFrameSignal != null && !firstFrameSignal.Task.IsCompleted)
+                                {
+                                    long elapsedMs = (long)(1000.0 * (Stopwatch.GetTimestamp() - _recordingStartTimestamp) / Stopwatch.Frequency);
+                                    firstFrameSignal.TrySetResult(elapsedMs);
+                                }
                             }
                         }
                         finally

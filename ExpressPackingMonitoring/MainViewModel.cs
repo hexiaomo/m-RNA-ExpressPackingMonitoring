@@ -105,6 +105,8 @@ namespace ExpressPackingMonitoring.ViewModels
         private readonly SemaphoreSlim _recorderLock = new SemaphoreSlim(1, 1);
         private bool _isInputOnCooldown = false;
         private Process _currentFfmpegProcess;
+        private TaskCompletionSource<long> _firstRecordingFrameWritten;
+        private long _recordingStartTimestamp;
         private bool _isDisposed = false; // 新增：防止销毁后操作 UI
         private WebServer _webServer;
         private GlobalKeyboardHook _globalKeyHook;
