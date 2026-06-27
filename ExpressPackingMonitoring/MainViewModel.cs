@@ -178,6 +178,7 @@ namespace ExpressPackingMonitoring.ViewModels
         private string _workstationPrintStatusText = "快递单打印工位：未连接";
         private string _workstationStatusToolTip = "";
         private string _monitorAccessAddress = "";
+        private int _workstationAddressRefreshVersion;
 
         private int _totalPieces;
         private TimeSpan _totalPackTime;
@@ -833,7 +834,7 @@ namespace ExpressPackingMonitoring.ViewModels
                         else
                             _globalKeyHook.Stop();
                     }
-                    RefreshWorkstationStatus();
+                    _ = RefreshWorkstationStatusAsync();
 
                     if (workstationChanged)
                     {
@@ -1071,7 +1072,7 @@ namespace ExpressPackingMonitoring.ViewModels
                 _webServer.EnableOrderInfoLog = Config.EnableOrderInfoLog;
                 _webServer.OrderInfoReceived += OnOrderInfoReceived;
                 _webServer.Start();
-                RefreshWorkstationStatus();
+                _ = RefreshWorkstationStatusAsync();
                 Debug.WriteLine($"[Web] 局域网服务已启动 http://0.0.0.0:{Config.WebServerPort}");
             }
             catch (Exception ex)
@@ -1085,8 +1086,9 @@ namespace ExpressPackingMonitoring.ViewModels
             }
         }
 
-        private void RefreshWorkstationStatus()
+        private async Task RefreshWorkstationStatusAsync()
         {
+            int version = Interlocked.Increment(ref _workstationAddressRefreshVersion);
             if (_webServer == null)
             {
                 MonitorAccessAddress = "";
@@ -1096,7 +1098,25 @@ namespace ExpressPackingMonitoring.ViewModels
                 return;
             }
 
-            MonitorAccessAddress = WorkstationNetwork.GetBestLocalAccessAddress(Config.WebServerPort);
+            MonitorAccessAddress = "";
+            WorkstationAccessText = "其他电脑访问：正在确认地址...";
+            WorkstationPrintStatusText = "快递单打印工位：可连接";
+            WorkstationStatusToolTip = "正在确认这台摄像头监控工位可供其他电脑访问的地址。";
+
+            string verifiedAddress;
+            try
+            {
+                verifiedAddress = await WorkstationNetwork.GetVerifiedLocalAccessAddressAsync(Config.WebServerPort);
+            }
+            catch
+            {
+                verifiedAddress = WorkstationNetwork.GetBestLocalAccessAddress(Config.WebServerPort);
+            }
+
+            if (version != _workstationAddressRefreshVersion || _webServer == null)
+                return;
+
+            MonitorAccessAddress = verifiedAddress;
             WorkstationAccessText = $"其他电脑访问：{MonitorAccessAddress}";
             WorkstationPrintStatusText = "快递单打印工位：可连接";
             WorkstationStatusToolTip = $"在快递单打印工位输入 {MonitorAccessAddress}，或直接用浏览器访问 http://{MonitorAccessAddress}";
@@ -1163,8 +1183,10 @@ namespace ExpressPackingMonitoring.ViewModels
         {
             if (_webServer != null)
             {
-                MonitorAccessAddress = WorkstationNetwork.GetBestLocalAccessAddress(Config.WebServerPort);
-                WorkstationAccessText = $"其他电脑访问：{MonitorAccessAddress}";
+                if (string.IsNullOrWhiteSpace(MonitorAccessAddress))
+                    _ = RefreshWorkstationStatusAsync();
+                else
+                    WorkstationAccessText = $"其他电脑访问：{MonitorAccessAddress}";
                 WorkstationPrintStatusText = "快递单打印工位：最近收到订单";
             }
             if (_speechService == null || !Config.EnableOrderInfoAnnounce) return;

@@ -144,6 +144,20 @@ public static class WorkstationNetwork
         return $"{ip}:{port}";
     }
 
+    public static async Task<string> GetVerifiedLocalAccessAddressAsync(int port, CancellationToken token = default)
+    {
+        string fallback = GetBestLocalAccessAddress(port);
+        foreach (var candidate in GetLocalNetworkCandidates())
+        {
+            token.ThrowIfCancellationRequested();
+            string address = $"{candidate.Address}:{port}";
+            if (await CanConnectAsync(address))
+                return address;
+        }
+
+        return fallback;
+    }
+
     public static bool TryOpenUrl(string url, out string error)
     {
         try
