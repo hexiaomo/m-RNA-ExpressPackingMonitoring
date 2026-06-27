@@ -128,7 +128,7 @@ namespace ExpressPackingMonitoring.ViewModels
                                 FilteredLogs.Remove(scanRecord);
                                 if (tooShort && fileSize >= 1024 * 50)
                                 {
-                                    ShowToast($"⚠ 录像过短({recordDuration:F1}s)，已丢弃");
+                                    ShowToast($"警告：录像过短({recordDuration:F1}s)，已丢弃");
                                     SpeakWarning("录像过短，已丢弃");
                                 }
                             }
@@ -291,7 +291,7 @@ namespace ExpressPackingMonitoring.ViewModels
 
                     if (_videoSource == null || !_videoSource.IsRunning)
                     {
-                        ShowToast("⚠ 摄像头未就绪，请检查连接");
+                        ShowToast("警告：摄像头未就绪，请检查连接");
                         SpeakWarning("摄像头未就绪");
                         return;
                     }
@@ -316,14 +316,14 @@ namespace ExpressPackingMonitoring.ViewModels
                     baseFolder = ResolveBestStoragePath();
                     if (!IsDirectoryWritable(baseFolder))
                     {
-                        ShowToast("⚠ 存储路径不可写，请检查磁盘");
+                        ShowToast("警告：存储路径不可写，请检查磁盘");
                         SpeakWarning("存储路径不可写");
                         return;
                     }
                 }
                 catch (Exception ex)
                 {
-                    ShowToast($"⚠ 存储初始化失败: {ex.Message}");
+                    ShowToast($"警告：存储初始化失败: {ex.Message}");
                     return;
                 }
 
@@ -334,7 +334,7 @@ namespace ExpressPackingMonitoring.ViewModels
                 }
                 catch (Exception ex)
                 {
-                    ShowToast($"⚠ 无法创建日期目录: {ex.Message}");
+                    ShowToast($"警告：无法创建日期目录: {ex.Message}");
                     return;
                 }
 
@@ -354,7 +354,7 @@ namespace ExpressPackingMonitoring.ViewModels
                 string ffmpegPath = FindFFmpeg();
                 if (string.IsNullOrEmpty(ffmpegPath))
                 {
-                    ShowToast("⚠ 未找到 FFmpeg，无法录制");
+                    ShowToast("警告：未找到 FFmpeg，无法录制");
                     ClearCurrentAudioLogPath(audioLogPath);
                     return;
                 }
@@ -425,7 +425,7 @@ namespace ExpressPackingMonitoring.ViewModels
                 // 6. 在数据库中创建记录占位符
                 _currentRecordId = _db?.InsertVideoRecord(_recordingOrderId, _recordingMode, _currentVideoCodec, _currentVideoEncoder, filePath, _recordStartTime) ?? 0;
 
-                ShowToast("▶ 开始录像");
+                ShowToast("提示：开始录像");
                 Speak("开始录制", cancelPrevious: false);
                 _currentScanRecord = new ScanRecord(_recordingOrderId, "0s", DateTime.Now.ToString("HH:mm:ss"), _recordingMode, true);
                 AddRecord(_currentScanRecord);
@@ -497,7 +497,7 @@ namespace ExpressPackingMonitoring.ViewModels
                         }
                     }
 
-                    ShowToast($"⚠ 录制启动失败");
+                    ShowToast("警告：录制启动失败");
                     SpeakWarning("录制失败");
                     MessageBox.Show(
                         $"当前设置的编码器无法完成录制，视频未保存。\n\n请求编码器: {EncodingHelper.GetEncoderLabel(requestedEncoder)}\n错误详情: {errorDetail}\n\n已自动尝试 CPU 软编码；若仍失败，请检查摄像头画面和存储路径。",
@@ -1679,7 +1679,7 @@ namespace ExpressPackingMonitoring.ViewModels
                     _ = Application.Current.Dispatcher.InvokeAsync(() =>
                     {
                         if (!_isDisposed)
-                            ShowToast("⚠️ 音频录制失败，已保留原始文件");
+                            ShowToast("警告：音频录制失败，已保留原始文件");
                     });
                     return;
                 }
@@ -1689,7 +1689,7 @@ namespace ExpressPackingMonitoring.ViewModels
                     _ = Application.Current.Dispatcher.InvokeAsync(() =>
                     {
                         if (!_isDisposed)
-                            ShowToast("⚠️ 音频疑似提前静音，已保留原始文件");
+                            ShowToast("警告：音频疑似提前静音，已保留原始文件");
                     });
                     return;
                 }
@@ -1741,7 +1741,7 @@ namespace ExpressPackingMonitoring.ViewModels
                     _ = Application.Current.Dispatcher.InvokeAsync(() =>
                     {
                         if (!_isDisposed)
-                            ShowToast("⚠ 音轨校验失败，已保留原始文件");
+                            ShowToast("警告：音轨校验失败，已保留原始文件");
                     });
                 }
             }

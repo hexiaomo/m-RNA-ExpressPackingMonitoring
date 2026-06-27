@@ -178,13 +178,13 @@
                                                     <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                                                     <Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
 
-                                                    <TextBlock Grid.Row="0" Text="📦 打包件数" Foreground="#64748B"/>
+                                                    <TextBlock Grid.Row="0" Text="打包件数" Foreground="#64748B"/>
                                                     <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding Pieces, StringFormat={}{0} 件}" FontWeight="Bold" HorizontalAlignment="Right"/>
 
-                                                    <TextBlock Grid.Row="1" Text="⏱ 总计时长" Foreground="#64748B" Margin="0,5"/>
+                                                    <TextBlock Grid.Row="1" Text="总计时长" Foreground="#64748B" Margin="0,5"/>
                                                     <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding TotalTime}" FontWeight="Bold" HorizontalAlignment="Right" Margin="0,5"/>
 
-                                                    <TextBlock Grid.Row="2" Text="💾 占用空间" Foreground="#64748B"/>
+                                                    <TextBlock Grid.Row="2" Text="占用空间" Foreground="#64748B"/>
                                                     <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding SizeText}" FontWeight="Bold" HorizontalAlignment="Right"/>
                                                 </Grid>
                                             </StackPanel>

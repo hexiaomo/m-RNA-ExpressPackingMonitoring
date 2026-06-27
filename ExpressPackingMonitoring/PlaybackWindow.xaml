@@ -48,7 +48,10 @@
                 </Grid.RowDefinitions>
 
                 <StackPanel Grid.Row="0" Margin="0,0,0,10">
-                    <TextBlock Text="📅 录像日期范围:" FontWeight="Bold" Margin="0,0,0,5" Foreground="{DynamicResource TextSecondary}"/>
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,5">
+                        <Path Data="{StaticResource FluentCalendarIcon}" Width="16" Height="16" Stretch="Uniform" Fill="{DynamicResource TextSecondary}" Margin="0,0,6,0"/>
+                        <TextBlock Text="录像日期范围:" FontWeight="Bold" Foreground="{DynamicResource TextSecondary}"/>
+                    </StackPanel>
                     <Grid Margin="0,0,0,15">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*"/>
@@ -60,10 +63,14 @@
                         <DatePicker x:Name="DpEndDate" Grid.Column="2" SelectedDateChanged="DateFilterChanged"/>
                     </Grid>
 
-                    <TextBlock Text="🔍 单号精准搜索:" FontWeight="Bold" Margin="0,0,0,5" Foreground="{DynamicResource TextSecondary}"/>
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,5">
+                        <Path Data="{StaticResource FluentSearchIcon}" Width="16" Height="16" Stretch="Uniform" Fill="{DynamicResource TextSecondary}" Margin="0,0,6,0"/>
+                        <TextBlock Text="单号精准搜索:" FontWeight="Bold" Foreground="{DynamicResource TextSecondary}"/>
+                    </StackPanel>
                     <Grid>
                         <TextBox x:Name="SearchBox" FontSize="14" Padding="5,5,28,5" TextChanged="TextFilterChanged" BorderBrush="{DynamicResource AccentBlueDark}" BorderThickness="2"/>
-                        <Button Content="✕" FontSize="12" Width="22" Height="22" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,4,0" Cursor="Hand" Foreground="{DynamicResource TextMuted}" Background="Transparent" BorderThickness="0" Focusable="False" Click="BtnClearSearch_Click">
+                        <Button Width="22" Height="22" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,4,0" Cursor="Hand" Foreground="{DynamicResource TextMuted}" Background="Transparent" BorderThickness="0" Focusable="False" Click="BtnClearSearch_Click">
+                            <Path Data="{StaticResource FluentDismissIcon}" Width="12" Height="12" Stretch="Uniform" Fill="{DynamicResource TextMuted}"/>
                             <Button.Template>
                                 <ControlTemplate TargetType="Button">
                                     <Border Background="{TemplateBinding Background}" CornerRadius="11">
@@ -188,7 +195,10 @@
                             <ColumnDefinition Width="Auto"/>
                         </Grid.ColumnDefinitions>
 
-                        <Button x:Name="BtnTogglePlay" Grid.Column="0" Content="▶" Width="40" Height="30" Click="BtnTogglePlay_Click" Background="{DynamicResource AccentGreen}" Foreground="White" FontWeight="Bold" ToolTip="播放/暂停" Margin="0,0,15,0" Cursor="Hand">
+                        <Button x:Name="BtnTogglePlay" Grid.Column="0" Width="48" Height="30" Click="BtnTogglePlay_Click" Background="{DynamicResource AccentGreen}" Foreground="White" FontWeight="Bold" ToolTip="播放/暂停" Margin="0,0,15,0" Cursor="Hand">
+                            <Button.Content>
+                                <Path Data="{StaticResource FluentPlayIcon}" Width="16" Height="16" Stretch="Uniform" Fill="White"/>
+                            </Button.Content>
                             <Button.Resources>
                                 <Style TargetType="Border">
                                     <Setter Property="CornerRadius" Value="4"/>
@@ -203,7 +213,12 @@
 
                         <TextBlock x:Name="TimeLabel" Grid.Column="2" Text="00:00:00 / 00:00:00" Foreground="White" VerticalAlignment="Center" Margin="15,0,0,0" FontFamily="Consolas"/>
 
-                        <Button x:Name="BtnLocateFile" Grid.Column="3" Content="📂 定位文件" Width="100" Height="30" Click="BtnLocateFile_Click" Background="{DynamicResource AccentBlue}" Foreground="White" FontWeight="Bold" Margin="15,0,0,0" Cursor="Hand"/>
+                        <Button x:Name="BtnLocateFile" Grid.Column="3" Width="104" Height="30" Click="BtnLocateFile_Click" Background="{DynamicResource AccentBlue}" Foreground="White" FontWeight="Bold" Margin="15,0,0,0" Cursor="Hand">
+                            <StackPanel Orientation="Horizontal">
+                                <Path Data="{StaticResource FluentFolderIcon}" Width="15" Height="15" Stretch="Uniform" Fill="White" Margin="0,0,6,0"/>
+                                <TextBlock Text="定位文件"/>
+                            </StackPanel>
+                        </Button>
                     </Grid>
                 </Border>
             </Grid>

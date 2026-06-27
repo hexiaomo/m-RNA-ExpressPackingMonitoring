@@ -54,7 +54,7 @@ namespace ExpressPackingMonitoring
                     return $"已覆盖 ({reason} {time})";
                 }
 
-                return IsMissing ? "⚠ 文件已丢失" : "";
+                return IsMissing ? "文件已丢失" : "";
             }
         }
 
@@ -89,8 +89,6 @@ namespace ExpressPackingMonitoring
             _timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(200) };
             _timer.Tick += Timer_Tick;
 
-            DpEndDate.SelectedDate = DateTime.Now;
-            DpStartDate.SelectedDate = DateTime.Now.AddYears(-10); // 默认范围为全部（近10年）
             BtnTogglePlay.IsEnabled = false;
             TimelineSlider.IsEnabled = false;
             TimeLabel.Text = "正在加载列表...";
@@ -123,9 +121,9 @@ namespace ExpressPackingMonitoring
             if (_isLoadingVideos)
                 return;
 
-            DateTime start = DpStartDate.SelectedDate ?? DateTime.Now.AddYears(-10);
-            DateTime end = DpEndDate.SelectedDate ?? DateTime.Now;
-            if (start > end)
+            DateTime? start = DpStartDate.SelectedDate;
+            DateTime? end = DpEndDate.SelectedDate;
+            if (start.HasValue && end.HasValue && start > end)
                 (start, end) = (end, start);
             string? keyword = SearchBox?.Text.Trim();
 
@@ -149,7 +147,7 @@ namespace ExpressPackingMonitoring
             }
         }
 
-        private List<VideoItem> BuildVideoList(DateTime start, DateTime end, string? keyword)
+        private List<VideoItem> BuildVideoList(DateTime? start, DateTime? end, string? keyword)
         {
             var videos = new List<VideoItem>();
             if (_db != null)
@@ -194,12 +192,20 @@ namespace ExpressPackingMonitoring
             return videos;
         }
 
-        private void LoadVideosFromFileSystem(List<VideoItem> videos, DateTime start, DateTime end)
+        private void LoadVideosFromFileSystem(List<VideoItem> videos, DateTime? start, DateTime? end)
         {
-            for (DateTime day = start.Date; day <= end.Date; day = day.AddDays(1))
+            if (!Directory.Exists(_folderPath))
+                return;
+
+            DateTime startDate = start?.Date ?? DateTime.MinValue.Date;
+            DateTime endDate = end?.Date ?? DateTime.MaxValue.Date;
+            foreach (var dateFolder in Directory.EnumerateDirectories(_folderPath))
             {
-                string dateFolder = Path.Combine(_folderPath, day.ToString("yyyy-MM-dd"));
-                if (!Directory.Exists(dateFolder))
+                string folderName = Path.GetFileName(dateFolder);
+                if (!DateTime.TryParse(folderName, out var folderDate))
+                    continue;
+
+                if (folderDate.Date < startDate || folderDate.Date > endDate)
                     continue;
 
                 foreach (var file in EnumerateVideoFiles(dateFolder))
@@ -419,13 +425,13 @@ namespace ExpressPackingMonitoring
             _isPlaying = isPlaying;
             if (isPlaying)
             {
-                BtnTogglePlay.Content = "⏸";
+                BtnTogglePlay.Content = "暂停";
                 BtnTogglePlay.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#FFC107"));
                 BtnTogglePlay.Foreground = Brushes.Black;
             }
             else
             {
-                BtnTogglePlay.Content = "▶";
+                BtnTogglePlay.Content = "播放";
                 BtnTogglePlay.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#28A745"));
                 BtnTogglePlay.Foreground = Brushes.White;
             }

@@ -36,14 +36,14 @@ namespace ExpressPackingMonitoring.ViewModels
         {
             if (_isEncoderDetectRunning)
             {
-                ShowToast("⏳ 检测已在运行中...");
+                ShowToast("处理中：检测已在运行中...");
                 return;
             }
 
             Task.Run(() =>
             {
                 _isEncoderDetectRunning = true;
-                ShowToast("🔄 正在重新检测 GPU 编码器，请稍候...");
+                ShowToast("处理中：正在重新检测 GPU 编码器，请稍候...");
 
                 var (options, validated) = DetectAvailableEncodersSync();
                 CachedEncoderOptions = options;
@@ -55,7 +55,7 @@ namespace ExpressPackingMonitoring.ViewModels
                 SaveConfig();
 
                 _isEncoderDetectRunning = false;
-                ShowToast("✅ 编码器重新检测完成");
+                ShowToast("成功：编码器重新检测完成");
             });
         }
 
@@ -99,7 +99,7 @@ namespace ExpressPackingMonitoring.ViewModels
 
             if (string.IsNullOrEmpty(ffmpegPath) || !File.Exists(ffmpegPath))
             {
-                log.AppendLine("⚠ FFmpeg 不存在，跳过检测");
+                log.AppendLine("FFmpeg 不存在，跳过检测");
                 WriteEncoderLog(log);
                 return (list, validated);
             }

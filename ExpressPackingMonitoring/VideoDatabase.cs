@@ -347,7 +347,7 @@ namespace ExpressPackingMonitoring
         /// <summary>
         /// 查询视频列表（支持日期范围 + 关键词过滤，包含已删除记录）
         /// </summary>
-        public List<VideoRecord> QueryVideos(DateTime startDate, DateTime endDate, string keyword = null)
+        public List<VideoRecord> QueryVideos(DateTime? startDate, DateTime? endDate, string keyword = null)
         {
             lock (_lock)
             {
@@ -359,8 +359,13 @@ namespace ExpressPackingMonitoring
                           StartTime, EndTime, DurationSeconds, StopReason,
                            IsDeleted, DeletedAt, DeleteReason
                     FROM VideoRecords 
-                    WHERE StartTime >= @startDate 
-                      AND StartTime < @endDate";
+                    WHERE 1 = 1";
+
+                if (startDate.HasValue)
+                    sql += " AND StartTime >= @startDate";
+
+                if (endDate.HasValue)
+                    sql += " AND StartTime < @endDate";
 
                 if (!string.IsNullOrWhiteSpace(keyword))
                 {
@@ -370,8 +375,10 @@ namespace ExpressPackingMonitoring
 
                 sql += " ORDER BY StartTime DESC;";
                 cmd.CommandText = sql;
-                cmd.Parameters.AddWithValue("@startDate", startDate.ToString("yyyy-MM-dd 00:00:00"));
-                cmd.Parameters.AddWithValue("@endDate", endDate.AddDays(1).ToString("yyyy-MM-dd 00:00:00"));
+                if (startDate.HasValue)
+                    cmd.Parameters.AddWithValue("@startDate", startDate.Value.ToString("yyyy-MM-dd 00:00:00"));
+                if (endDate.HasValue)
+                    cmd.Parameters.AddWithValue("@endDate", endDate.Value.AddDays(1).ToString("yyyy-MM-dd 00:00:00"));
 
                 using var reader = cmd.ExecuteReader();
                 while (reader.Read())

@@ -135,7 +135,7 @@ namespace ExpressPackingMonitoring.ViewModels
                 _ = Application.Current.Dispatcher.InvokeAsync(() =>
                 {
                     if (_isDisposed) return;
-                    ShowToast($"🗑 磁盘清理: 已从多盘回收 {count} 个旧视频");
+                    ShowToast($"清理：已从多盘回收 {count} 个旧视频");
                     RefreshTodayStats();
                 });
             }

@@ -529,7 +529,7 @@ namespace ExpressPackingMonitoring.ViewModels
             ScanInputText = ""; 
 
             // 指令处理
-            if (upperResult.Contains("CLEAR") || upperResult.Contains("清除")) { ShowToast("🧹 扫码框已清除"); return; }
+            if (upperResult.Contains("CLEAR") || upperResult.Contains("清除")) { ShowToast("提示：扫码框已清除"); return; }
             if (upperResult.Contains("SHIP") || upperResult.Contains("发货") || upperResult.Contains("FAHUO")) { CurrentMode = "发货"; StartInputCooldown(); ShowToast("切换为发货模式"); Speak("切换发货"); return; }
             if (upperResult.Contains("BACK") || upperResult.Contains("退货") || upperResult.Contains("TUIHUO")) { CurrentMode = "退货"; StartInputCooldown(); ShowToast("切换为退货模式"); Speak("切换退货"); return; }
             if (upperResult.Contains("START") || upperResult.Contains("开始录制")) { ToggleRecording(); return; }
@@ -559,7 +559,7 @@ namespace ExpressPackingMonitoring.ViewModels
                 bool isDuplicate = _db != null && _db.OrderIdExistsRecent(upperResult, excludeRecordId: _currentRecordId);
                 if (isDuplicate)
                 {
-                    ShowToast("⚠ 重复单号，请确认");
+                    ShowToast("警告：重复单号，请确认");
                     SpeakWarning("重复单号", 3, cancelPrevious: false);
                 }
 
@@ -701,7 +701,7 @@ namespace ExpressPackingMonitoring.ViewModels
         {
             if (_isEncoderDetectRunning)
             {
-                ShowToast("⏳ 编码器环境检测中，请稍后打开设置...");
+                ShowToast("处理中：编码器环境检测中，请稍后打开设置...");
                 return;
             }
             try
@@ -760,19 +760,19 @@ namespace ExpressPackingMonitoring.ViewModels
                     {
                         if (IsRecording)
                         {
-                            ShowToast("⚙️ 配置已保存，摄像头配置将在录制结束后生效");
+                            ShowToast("提示：配置已保存，摄像头配置将在录制结束后生效");
                             _pendingCameraRestart = true;
                         }
                         else
                         {
-                            ShowToast("⚙️ 配置已保存，重启相机");
+                            ShowToast("提示：配置已保存，重启相机");
                             _consecutiveRestartFailures = 0;
                             RestartCamera();
                         }
                     }
                     else
                     {
-                        ShowToast("⚙️ 配置已保存");
+                        ShowToast("提示：配置已保存");
                     }
                 }
             }
@@ -960,7 +960,7 @@ namespace ExpressPackingMonitoring.ViewModels
             catch (Exception ex)
             {
                 Debug.WriteLine($"[Web] 启动失败: {ex.Message}");
-                ShowToast($"⚠ 局域网服务启动失败: {ex.Message}");
+                ShowToast($"警告：局域网服务启动失败: {ex.Message}");
             }
         }
 
@@ -1012,7 +1012,7 @@ namespace ExpressPackingMonitoring.ViewModels
                     if (_videoSource != null && _videoSource.IsRunning)
                     {
                         _consecutiveRestartFailures = 0;
-                        ShowToast("✅ 摄像头已重连，录制继续");
+                        ShowToast("成功：摄像头已重连，录制继续");
                         Speak("摄像头已连接");
                     }
                     else
@@ -1023,7 +1023,7 @@ namespace ExpressPackingMonitoring.ViewModels
                             // 多次重连失败，停止录制
                             _stopReason = "摄像头断连";
                             await SafeStopRecordingAsync();
-                            ShowToast($"⚠ 摄像头连续 {MaxConsecutiveRestartFailures} 次重连失败，录制已停止。请重新插拔后在设置中手动重启。");
+                            ShowToast($"警告：摄像头连续 {MaxConsecutiveRestartFailures} 次重连失败，录制已停止。请重新插拔后在设置中手动重启。");
                             SpeakWarning("请重新连接摄像头", 3);
                             Debug.WriteLine($"[Camera] 录制中连续 {_consecutiveRestartFailures} 次重连失败，停止录制和自动重连");
                         }
@@ -1049,7 +1049,7 @@ namespace ExpressPackingMonitoring.ViewModels
                         _consecutiveRestartFailures++;
                         if (_consecutiveRestartFailures >= MaxConsecutiveRestartFailures)
                         {
-                            ShowToast($"⚠ 摄像头连续 {MaxConsecutiveRestartFailures} 次重连失败，已停止自动重连。请重新插拔后在设置中手动重启。");
+                            ShowToast($"警告：摄像头连续 {MaxConsecutiveRestartFailures} 次重连失败，已停止自动重连。请重新插拔后在设置中手动重启。");
                             SpeakWarning("请重新连接摄像头", 3);
                             Debug.WriteLine($"[Camera] 连续 {_consecutiveRestartFailures} 次重连失败，停止自动重连");
                         }
@@ -1110,7 +1110,7 @@ namespace ExpressPackingMonitoring.ViewModels
                         IsCameraSleeping = true; // SetProperty 会同时更新字段并触发 PropertyChanged
                         StopCamera();
                         VideoFrame = null;
-                        ShowToast($"💤 摄像头已休眠（空闲{Config.CameraIdleMinutes}分钟）");
+                        ShowToast($"提示：摄像头已休眠（空闲{Config.CameraIdleMinutes}分钟）");
                         Speak("摄像头已休眠");
                         Debug.WriteLine($"[Idle] 摄像头休眠: 空闲{idleMinutes:F1}分钟");
                     });
@@ -1127,7 +1127,7 @@ namespace ExpressPackingMonitoring.ViewModels
                 var videoDevices = new FilterInfoCollection(FilterCategory.VideoInputDevice);
                 if (videoDevices.Count == 0) 
                 { 
-                    ShowToast("⚠ 未检测到任何摄像头"); 
+                    ShowToast("警告：未检测到任何摄像头");
                     SpeakWarning("未检测到摄像头");
                     return; 
                 }
@@ -1151,7 +1151,7 @@ namespace ExpressPackingMonitoring.ViewModels
                     if (targetIndex == -1)
                     {
                         Debug.WriteLine($"[Camera] 目标摄像头未找到: {targetMoniker}，不切换到其他设备");
-                        ShowToast("⚠ 目标摄像头未连接，等待重新插入");
+                        ShowToast("警告：目标摄像头未连接，等待重新插入");
                         return;
                     }
                 }
@@ -1187,7 +1187,7 @@ namespace ExpressPackingMonitoring.ViewModels
                 _videoSource.VideoSourceError += (s, e) => {
                     Debug.WriteLine($"[Camera] 视频源错误: {e.Description}");
                     _ = Application.Current.Dispatcher.InvokeAsync(() => {
-                        ShowToast("⚠ 摄像头连接发生错误，尝试重连...");
+                        ShowToast("警告：摄像头连接发生错误，尝试重连...");
                         RestartCameraWithRecordingStop();
                     });
                 };
@@ -1489,7 +1489,7 @@ namespace ExpressPackingMonitoring.ViewModels
                             {
                                 Debug.WriteLine($"[Camera] 信号丢失 {noFrameSeconds:F1}s，尝试重连 (失败次数={_consecutiveRestartFailures})");
                                 _ = Application.Current.Dispatcher.InvokeAsync(() => {
-                                    ShowToast("⚠ 摄像头信号丢失，尝试重连...");
+                                    ShowToast("警告：摄像头信号丢失，尝试重连...");
                                     SpeakWarning("摄像头重新连接中");
                                     RestartCameraWithRecordingStop();
                                 });
@@ -1503,7 +1503,7 @@ namespace ExpressPackingMonitoring.ViewModels
                             {
                                 Debug.WriteLine($"[Camera] 摄像头断开，尝试重连 (失败次数={_consecutiveRestartFailures})");
                                 _ = Application.Current.Dispatcher.InvokeAsync(() => {
-                                    ShowToast("⚠ 摄像头已断开，等待重新连接...");
+                                    ShowToast("警告：摄像头已断开，等待重新连接...");
                                     SpeakWarning("摄像头重新连接中");
                                     RestartCameraWithRecordingStop();
                                 });
@@ -1585,7 +1585,7 @@ namespace ExpressPackingMonitoring.ViewModels
                             _ = Application.Current.Dispatcher.InvokeAsync(async () => { 
                                 if (_isDisposed) return;
                                 await SafeStopRecordingAsync(); 
-                                ShowToast("⏳ 已达最大录像限制时长"); 
+                                ShowToast("提示：已达最大录像限制时长");
                                 SpeakWarning("时长超时，停止录制"); 
                                 CurrentOrderId = ""; 
                                 ScanInputText = ""; 
