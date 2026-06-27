@@ -1466,6 +1466,15 @@
                                 </StackPanel>
                             </Border>
 
+                        </StackPanel>
+                    </ScrollViewer>
+                </Border>
+            </TabItem>
+
+            <TabItem Header="关于">
+                <Border Background="Transparent" Padding="0,4,0,0">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                        <StackPanel>
                             <Border Style="{StaticResource SectionCardStyle}">
                                 <StackPanel>
                                     <TextBlock Text="关于与开源许可" Style="{StaticResource SectionTitleStyle}"/>
