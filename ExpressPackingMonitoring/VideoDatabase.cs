@@ -2,6 +2,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
 
@@ -91,6 +92,7 @@ namespace ExpressPackingMonitoring
 
         private void InitializeDatabase()
         {
+            bool databaseExisted = File.Exists(_dbPath);
             _connection = new SqliteConnection($"Data Source={_dbPath}");
             _connection.Open();
 
@@ -148,14 +150,7 @@ namespace ExpressPackingMonitoring
                 );");
 
             // 索引
-            ExecuteNonQuery("CREATE INDEX IF NOT EXISTS idx_video_orderid ON VideoRecords(OrderId);");
-            ExecuteNonQuery("CREATE INDEX IF NOT EXISTS idx_video_starttime ON VideoRecords(StartTime);");
-            ExecuteNonQuery("CREATE INDEX IF NOT EXISTS idx_video_filepath ON VideoRecords(FilePath);");
-            ExecuteNonQuery("CREATE INDEX IF NOT EXISTS idx_video_isdeleted ON VideoRecords(IsDeleted);");
-            ExecuteNonQuery("CREATE INDEX IF NOT EXISTS idx_video_active_starttime ON VideoRecords(IsDeleted, StartTime DESC);");
-            ExecuteNonQuery("CREATE INDEX IF NOT EXISTS idx_video_tracking ON VideoRecords(TrackingNumber);");
-            ExecuteNonQuery("CREATE INDEX IF NOT EXISTS idx_video_source_order ON VideoRecords(SourceOrderId);");
-            ExecuteNonQuery("CREATE INDEX IF NOT EXISTS idx_orderinfo_source_order ON OrderInfoRecords(SourceOrderId);");
+            BackupBeforeSchemaMigrationIfNeeded(databaseExisted);
 
             EnsureColumnExists("VideoRecords", "VideoCodec", "TEXT DEFAULT ''");
             EnsureColumnExists("VideoRecords", "VideoEncoder", "TEXT DEFAULT ''");
@@ -166,6 +161,15 @@ namespace ExpressPackingMonitoring
             EnsureColumnExists("VideoRecords", "ProductInfo", "TEXT DEFAULT ''");
             EnsureColumnExists("VideoRecords", "OrderInfoPushTime", "TEXT");
             EnsureColumnExists("VideoRecords", "OrderInfoJson", "TEXT DEFAULT ''");
+
+            ExecuteNonQuery("CREATE INDEX IF NOT EXISTS idx_video_orderid ON VideoRecords(OrderId);");
+            ExecuteNonQuery("CREATE INDEX IF NOT EXISTS idx_video_starttime ON VideoRecords(StartTime);");
+            ExecuteNonQuery("CREATE INDEX IF NOT EXISTS idx_video_filepath ON VideoRecords(FilePath);");
+            ExecuteNonQuery("CREATE INDEX IF NOT EXISTS idx_video_isdeleted ON VideoRecords(IsDeleted);");
+            ExecuteNonQuery("CREATE INDEX IF NOT EXISTS idx_video_active_starttime ON VideoRecords(IsDeleted, StartTime DESC);");
+            ExecuteNonQuery("CREATE INDEX IF NOT EXISTS idx_video_tracking ON VideoRecords(TrackingNumber);");
+            ExecuteNonQuery("CREATE INDEX IF NOT EXISTS idx_video_source_order ON VideoRecords(SourceOrderId);");
+            ExecuteNonQuery("CREATE INDEX IF NOT EXISTS idx_orderinfo_source_order ON OrderInfoRecords(SourceOrderId);");
         }
 
         /// <summary>
@@ -906,6 +910,78 @@ namespace ExpressPackingMonitoring
                     return value.Trim();
             }
             return "";
+        }
+
+        private void BackupBeforeSchemaMigrationIfNeeded(bool databaseExisted)
+        {
+            if (!databaseExisted) return;
+            if (!TableExists("VideoRecords")) return;
+
+            var columns = GetTableColumns("VideoRecords");
+            string[] requiredColumns =
+            {
+                "VideoCodec",
+                "VideoEncoder",
+                "TrackingNumber",
+                "SourceOrderId",
+                "BuyerMessage",
+                "SellerMemo",
+                "ProductInfo",
+                "OrderInfoPushTime",
+                "OrderInfoJson"
+            };
+
+            if (requiredColumns.All(columns.Contains))
+                return;
+
+            ExecuteNonQuery("PRAGMA wal_checkpoint(FULL);");
+
+            string backupDir = CreateSchemaMigrationBackupDirectory();
+            string destinationPrefix = Path.Combine(backupDir, "videos-before-schema-migration");
+            CopySqliteFileIfExists(_dbPath, destinationPrefix + ".db");
+            CopySqliteFileIfExists(_dbPath + "-wal", destinationPrefix + ".db-wal");
+            CopySqliteFileIfExists(_dbPath + "-shm", destinationPrefix + ".db-shm");
+        }
+
+        private bool TableExists(string tableName)
+        {
+            using var cmd = _connection.CreateCommand();
+            cmd.CommandText = "SELECT COUNT(1) FROM sqlite_master WHERE type='table' AND name=$name;";
+            cmd.Parameters.AddWithValue("$name", tableName);
+            return Convert.ToInt32(cmd.ExecuteScalar()) > 0;
+        }
+
+        private HashSet<string> GetTableColumns(string tableName)
+        {
+            var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            using var cmd = _connection.CreateCommand();
+            cmd.CommandText = $"PRAGMA table_info('{tableName.Replace("'", "''")}');";
+            using var reader = cmd.ExecuteReader();
+            while (reader.Read())
+                result.Add(reader.GetString(1));
+            return result;
+        }
+
+        private static string CreateSchemaMigrationBackupDirectory()
+        {
+            Directory.CreateDirectory(AppPaths.BackupsDir);
+            string baseName = $"schema-migration-videos-db-{DateTime.Now:yyyyMMdd-HHmmss}";
+            string dir = Path.Combine(AppPaths.BackupsDir, baseName);
+            int suffix = 1;
+            while (Directory.Exists(dir))
+            {
+                suffix++;
+                dir = Path.Combine(AppPaths.BackupsDir, $"{baseName}-{suffix}");
+            }
+            Directory.CreateDirectory(dir);
+            return dir;
+        }
+
+        private static void CopySqliteFileIfExists(string sourcePath, string destinationPath)
+        {
+            if (!File.Exists(sourcePath)) return;
+            Directory.CreateDirectory(Path.GetDirectoryName(destinationPath));
+            File.Copy(sourcePath, destinationPath, overwrite: false);
         }
 
 
