@@ -669,10 +669,8 @@ namespace ExpressPackingMonitoring
             var qs = ctx.Request.QueryString;
             string keyword = qs["keyword"] ?? qs["q"] ?? "";
 
-            if (!DateTime.TryParse(qs["start"], out var startDate))
-                startDate = DateTime.Today.AddDays(-7);
-            if (!DateTime.TryParse(qs["end"], out var endDate))
-                endDate = DateTime.Today;
+            DateTime? startDate = DateTime.TryParse(qs["start"], out var parsedStartDate) ? parsedStartDate : null;
+            DateTime? endDate = DateTime.TryParse(qs["end"], out var parsedEndDate) ? parsedEndDate : null;
 
             int page = int.TryParse(qs["page"], out var p) ? Math.Max(1, p) : 1;
             int pageSize = int.TryParse(qs["size"], out var s) ? Math.Clamp(s, 1, 100) : 50;

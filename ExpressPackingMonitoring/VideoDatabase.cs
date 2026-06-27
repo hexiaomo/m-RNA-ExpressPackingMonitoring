@@ -421,7 +421,7 @@ namespace ExpressPackingMonitoring
             };
         }
 
-        public PagedVideoResult QueryVideosPaged(DateTime startDate, DateTime endDate, string keyword, int page, int pageSize, bool includeDeleted = false)
+        public PagedVideoResult QueryVideosPaged(DateTime? startDate, DateTime? endDate, string keyword, int page, int pageSize, bool includeDeleted = false)
         {
             page = Math.Max(1, page);
             pageSize = Math.Clamp(pageSize, 1, 100);
@@ -432,8 +432,13 @@ namespace ExpressPackingMonitoring
                 using var countCmd = _connection.CreateCommand();
                 string whereSql = @"
                     FROM VideoRecords
-                    WHERE StartTime >= @startDate
-                      AND StartTime < @endDate";
+                    WHERE 1 = 1";
+
+                if (startDate.HasValue)
+                    whereSql += " AND StartTime >= @startDate";
+
+                if (endDate.HasValue)
+                    whereSql += " AND StartTime < @endDate";
 
                 if (!includeDeleted)
                     whereSql += " AND IsDeleted = 0";
@@ -445,8 +450,10 @@ namespace ExpressPackingMonitoring
                 }
 
                 countCmd.CommandText = "SELECT COUNT(1) " + whereSql + ";";
-                countCmd.Parameters.AddWithValue("@startDate", startDate.ToString("yyyy-MM-dd 00:00:00"));
-                countCmd.Parameters.AddWithValue("@endDate", endDate.AddDays(1).ToString("yyyy-MM-dd 00:00:00"));
+                if (startDate.HasValue)
+                    countCmd.Parameters.AddWithValue("@startDate", startDate.Value.ToString("yyyy-MM-dd 00:00:00"));
+                if (endDate.HasValue)
+                    countCmd.Parameters.AddWithValue("@endDate", endDate.Value.AddDays(1).ToString("yyyy-MM-dd 00:00:00"));
                 int total = Convert.ToInt32(countCmd.ExecuteScalar());
 
                 using var cmd = _connection.CreateCommand();
@@ -457,8 +464,10 @@ namespace ExpressPackingMonitoring
                     + whereSql + @"
                     ORDER BY StartTime DESC
                     LIMIT @limit OFFSET @offset;";
-                cmd.Parameters.AddWithValue("@startDate", startDate.ToString("yyyy-MM-dd 00:00:00"));
-                cmd.Parameters.AddWithValue("@endDate", endDate.AddDays(1).ToString("yyyy-MM-dd 00:00:00"));
+                if (startDate.HasValue)
+                    cmd.Parameters.AddWithValue("@startDate", startDate.Value.ToString("yyyy-MM-dd 00:00:00"));
+                if (endDate.HasValue)
+                    cmd.Parameters.AddWithValue("@endDate", endDate.Value.AddDays(1).ToString("yyyy-MM-dd 00:00:00"));
                 cmd.Parameters.AddWithValue("@limit", pageSize);
                 cmd.Parameters.AddWithValue("@offset", offset);
                 if (!string.IsNullOrWhiteSpace(keyword))
