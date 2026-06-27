@@ -1,0 +1,173 @@
+using System.Diagnostics;
+using System.IO;
+using System.Net;
+using System.Net.Http;
+using System.Net.NetworkInformation;
+using System.Net.Sockets;
+using System.Text;
+using System.Text.Json;
+using ExpressPackingMonitoring.ViewModels;
+
+namespace ExpressPackingMonitoring;
+
+public static class WorkstationRoles
+{
+    public const string CameraMonitor = "CameraMonitor";
+    public const string PrintStation = "PrintStation";
+
+    public static bool IsKnown(string? role) =>
+        string.Equals(role, CameraMonitor, StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(role, PrintStation, StringComparison.OrdinalIgnoreCase);
+
+    public static string GetDisplayName(string? role) =>
+        string.Equals(role, PrintStation, StringComparison.OrdinalIgnoreCase) ? "快递单打印工位" : "摄像头监控工位";
+}
+
+public static class WorkstationConfigStore
+{
+    private static readonly JsonSerializerOptions Options = new()
+    {
+        WriteIndented = true,
+        Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+    };
+
+    public static AppConfig Load()
+    {
+        try
+        {
+            if (File.Exists(AppPaths.ConfigPath))
+                return JsonSerializer.Deserialize<AppConfig>(File.ReadAllText(AppPaths.ConfigPath)) ?? new AppConfig();
+        }
+        catch
+        {
+        }
+
+        return new AppConfig();
+    }
+
+    public static void Save(AppConfig config)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(AppPaths.ConfigPath) ?? AppContext.BaseDirectory);
+        File.WriteAllText(AppPaths.ConfigPath, JsonSerializer.Serialize(config, Options));
+    }
+}
+
+public static class WorkstationNetwork
+{
+    private static readonly HttpClient Client = new() { Timeout = TimeSpan.FromMilliseconds(800) };
+
+    public static string NormalizeAddress(string input, int defaultPort = 5280)
+    {
+        input = (input ?? "").Trim();
+        if (input.StartsWith("http://", StringComparison.OrdinalIgnoreCase))
+            input = input[7..];
+        if (input.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+            input = input[8..];
+        input = input.TrimEnd('/');
+        if (string.IsNullOrWhiteSpace(input)) return "";
+        return input.Contains(':') ? input : $"{input}:{defaultPort}";
+    }
+
+    public static string ToUrl(string address) => $"http://{NormalizeAddress(address)}";
+
+    public static async Task<bool> CanConnectAsync(string address)
+    {
+        address = NormalizeAddress(address);
+        if (string.IsNullOrWhiteSpace(address)) return false;
+
+        try
+        {
+            using var response = await Client.GetAsync($"{ToUrl(address)}/api/storage");
+            return response.IsSuccessStatusCode;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    public static async Task<bool> SendTestOrderAsync(string address)
+    {
+        address = NormalizeAddress(address);
+        if (string.IsNullOrWhiteSpace(address)) return false;
+
+        var order = new[]
+        {
+            new
+            {
+                trackingNumber = $"TEST{DateTime.Now:HHmmss}",
+                orderId = "工位连接测试",
+                buyerMessage = "这是一条连接测试",
+                sellerMemo = "",
+                productInfo = "测试订单"
+            }
+        };
+
+        try
+        {
+            using var content = new StringContent(JsonSerializer.Serialize(order), Encoding.UTF8, "application/json");
+            using var response = await Client.PostAsync($"{ToUrl(address)}/api/orderinfo", content);
+            return response.IsSuccessStatusCode;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    public static async Task<string?> FindMonitorAsync(int port, IProgress<string>? progress = null, CancellationToken token = default)
+    {
+        var prefixes = GetLocalIpv4Prefixes().Distinct().ToList();
+        foreach (string prefix in prefixes)
+        {
+            for (int start = 1; start <= 254; start += 32)
+            {
+                token.ThrowIfCancellationRequested();
+                progress?.Report($"正在查找 {prefix}.x");
+                var batch = Enumerable.Range(start, Math.Min(32, 255 - start))
+                    .Select(i => $"{prefix}.{i}:{port}")
+                    .Select(async address => new { address, ok = await CanConnectAsync(address) })
+                    .ToArray();
+                var results = await Task.WhenAll(batch);
+                string? found = results.FirstOrDefault(r => r.ok)?.address;
+                if (found != null) return found;
+            }
+        }
+
+        return null;
+    }
+
+    public static string GetBestLocalAccessAddress(int port)
+    {
+        string ip = GetLocalIpv4Addresses().FirstOrDefault(a => !a.StartsWith("169.254.")) ?? "127.0.0.1";
+        return $"{ip}:{port}";
+    }
+
+    public static void OpenUrl(string url)
+    {
+        Process.Start(new ProcessStartInfo { FileName = url, UseShellExecute = true });
+    }
+
+    private static IEnumerable<string> GetLocalIpv4Prefixes()
+    {
+        foreach (string ip in GetLocalIpv4Addresses())
+        {
+            var parts = ip.Split('.');
+            if (parts.Length == 4)
+                yield return $"{parts[0]}.{parts[1]}.{parts[2]}";
+        }
+    }
+
+    private static IEnumerable<string> GetLocalIpv4Addresses()
+    {
+        foreach (var nic in NetworkInterface.GetAllNetworkInterfaces())
+        {
+            if (nic.OperationalStatus != OperationalStatus.Up) continue;
+            foreach (var addr in nic.GetIPProperties().UnicastAddresses)
+            {
+                if (addr.Address.AddressFamily == AddressFamily.InterNetwork && !IPAddress.IsLoopback(addr.Address))
+                    yield return addr.Address.ToString();
+            }
+        }
+    }
+}

@@ -82,7 +82,7 @@
     </Window.Resources>
 
     <Grid>
-        <Grid Margin="24">
+        <Grid Margin="24,24,24,58">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="360"/>
@@ -482,6 +482,32 @@
                 </Grid>
             </Border>
         </Grid>
+
+        <Border Background="{DynamicResource PanelBackground}"
+                BorderBrush="{DynamicResource BorderDefault}"
+                BorderThickness="1"
+                CornerRadius="8"
+                Padding="14,8"
+                Margin="24,0,24,14"
+                VerticalAlignment="Bottom"
+                ToolTip="{Binding WorkstationStatusToolTip}">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <Path Grid.Column="0" Data="{StaticResource FluentCameraIcon}" Width="16" Height="16" Stretch="Uniform" Fill="{DynamicResource AccentBlue}" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                <TextBlock Grid.Column="1" Text="{Binding WorkstationStatusText}" Foreground="{DynamicResource TextSecondary}" FontSize="12" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                <Button Grid.Column="2" Command="{Binding CopyMonitorAddressCommand}" Width="30" Height="26" Margin="10,0,0,0" Background="Transparent" BorderThickness="0" ToolTip="复制地址" Cursor="Hand">
+                    <Path Data="{StaticResource FluentCopyIcon}" Width="15" Height="15" Stretch="Uniform" Fill="{DynamicResource TextSecondary}"/>
+                </Button>
+                <Button Grid.Column="3" Command="{Binding SwitchWorkstationCommand}" Width="30" Height="26" Margin="4,0,0,0" Background="Transparent" BorderThickness="0" ToolTip="切换工位" Cursor="Hand">
+                    <Path Data="{StaticResource FluentArrowSyncIcon}" Width="15" Height="15" Stretch="Uniform" Fill="{DynamicResource TextSecondary}"/>
+                </Button>
+            </Grid>
+        </Border>
 
         <Border Background="{DynamicResource ToastBackground}" CornerRadius="8" Padding="32,16" HorizontalAlignment="Center" VerticalAlignment="Center" IsHitTestVisible="False">
             <Border.Style>

@@ -343,6 +343,35 @@
                                             <ColumnDefinition Width="*"/>
                                         </Grid.ColumnDefinitions>
                                         <StackPanel Margin="0,0,16,0">
+                                            <TextBlock Text="工位用途" Style="{StaticResource FieldLabelStyle}"/>
+                                            <TextBlock Text="按这台电脑连接的硬件选择，保存后重启程序生效。"
+                                                       Style="{StaticResource FieldHintStyle}"/>
+                                        </StackPanel>
+                                        <ComboBox Grid.Column="1"
+                                                  SelectedValue="{Binding Config.WorkstationRole}"
+                                                  SelectedValuePath="Tag"
+                                                  Cursor="Hand">
+                                            <ComboBoxItem Tag="CameraMonitor">
+                                                <StackPanel Orientation="Horizontal">
+                                                    <Path Data="{StaticResource FluentCameraIcon}" Width="16" Height="16" Stretch="Uniform" Fill="{DynamicResource AccentBlue}" Margin="0,0,8,0"/>
+                                                    <TextBlock Text="摄像头监控工位"/>
+                                                </StackPanel>
+                                            </ComboBoxItem>
+                                            <ComboBoxItem Tag="PrintStation">
+                                                <StackPanel Orientation="Horizontal">
+                                                    <Path Data="{StaticResource FluentPrinterIcon}" Width="16" Height="16" Stretch="Uniform" Fill="{DynamicResource AccentOrange}" Margin="0,0,8,0"/>
+                                                    <TextBlock Text="快递单打印工位"/>
+                                                </StackPanel>
+                                            </ComboBoxItem>
+                                        </ComboBox>
+                                    </Grid>
+
+                                    <Grid Style="{StaticResource SettingRowStyle}">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="230"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Margin="0,0,16,0">
                                             <TextBlock Text="外观主题" Style="{StaticResource FieldLabelStyle}"/>
                                             <TextBlock Text="可跟随系统，或固定为浅色 / 深色主题。"
                                                        Style="{StaticResource FieldHintStyle}"/>

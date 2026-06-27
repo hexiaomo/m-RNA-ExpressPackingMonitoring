@@ -173,6 +173,9 @@ namespace ExpressPackingMonitoring.ViewModels
         private bool _maxDurationWarned = false;
         private bool _pendingCameraRestart = false; // 录制中修改了摄像头配置，录制结束后重启
         private bool _isEncoderDetectRunning = true; // 是否正在进行 GPU 编码器检测
+        private string _workstationStatusText = "其他电脑暂时无法连接";
+        private string _workstationStatusToolTip = "";
+        private string _monitorAccessAddress = "";
 
         private int _totalPieces;
         private TimeSpan _totalPackTime;
@@ -212,6 +215,9 @@ namespace ExpressPackingMonitoring.ViewModels
         public double DiskUsagePercent { get => _diskUsagePercent; set => SetProperty(ref _diskUsagePercent, value); }
         public string DiskUsageText { get => _diskUsageText; set => SetProperty(ref _diskUsageText, value); }
         public AppConfig Config { get => _config; set => SetProperty(ref _config, value); }
+        public string WorkstationStatusText { get => _workstationStatusText; set => SetProperty(ref _workstationStatusText, value); }
+        public string WorkstationStatusToolTip { get => _workstationStatusToolTip; set => SetProperty(ref _workstationStatusToolTip, value); }
+        public string MonitorAccessAddress { get => _monitorAccessAddress; set => SetProperty(ref _monitorAccessAddress, value); }
 
         // 条形码（自动计算）
         private string _barcode1Label;
@@ -322,6 +328,8 @@ namespace ExpressPackingMonitoring.ViewModels
         public ICommand ToggleRecordingCommand { get; }
         public ICommand OpenStatsCommand { get; } // 打开统计面板
         public ICommand ResetEncoderDetectCommand { get; } // 重置编码器检测
+        public ICommand CopyMonitorAddressCommand { get; }
+        public ICommand SwitchWorkstationCommand { get; }
 
         public MainViewModel()
         {
@@ -334,6 +342,8 @@ namespace ExpressPackingMonitoring.ViewModels
                 ToggleModeCommand = new RelayCommand(() => { });
                 ToggleRecordingCommand = new RelayCommand(() => { });
                 OpenStatsCommand = new RelayCommand(() => { });
+                CopyMonitorAddressCommand = new RelayCommand(() => { });
+                SwitchWorkstationCommand = new RelayCommand(() => { });
                 ClearScanInputCommand = new RelayCommand(() => { });
                 ClearSearchCommand = new RelayCommand(() => { });
                 return;
@@ -385,6 +395,8 @@ namespace ExpressPackingMonitoring.ViewModels
             ToggleRecordingCommand = new RelayCommand(ToggleRecording);
             OpenStatsCommand = new RelayCommand(OpenStatsWindow);
             ResetEncoderDetectCommand = new RelayCommand(ResetEncoderDetect);
+            CopyMonitorAddressCommand = new RelayCommand(CopyMonitorAddress);
+            SwitchWorkstationCommand = new RelayCommand(SwitchWorkstation);
             ClearScanInputCommand = new RelayCommand(() => ScanInputText = "");
             ClearSearchCommand = new RelayCommand(() => LogSearchText = "");
             InitializeSystem();
@@ -737,6 +749,8 @@ namespace ExpressPackingMonitoring.ViewModels
                 Config.VideoCqp = 25;
             if (Config.AudioSyncOffsetMs == 400)
                 Config.AudioSyncOffsetMs = 0;
+            if (!WorkstationRoles.IsKnown(Config.WorkstationRole))
+                Config.WorkstationRole = WorkstationRoles.CameraMonitor;
             Config.AudioSyncOffsetMs = Math.Clamp(Config.AudioSyncOffsetMs, -5000, 5000);
             if (string.IsNullOrWhiteSpace(Config.AiTtsEngine))
                 Config.AiTtsEngine = "Edge";
@@ -777,6 +791,7 @@ namespace ExpressPackingMonitoring.ViewModels
                         || Config.Fps != clonedConfig.Fps;
                     bool themeChanged = Config.Theme != clonedConfig.Theme;
                     bool globalKeyChanged = Config.EnableGlobalKeyboard != clonedConfig.EnableGlobalKeyboard;
+                    bool workstationChanged = Config.WorkstationRole != clonedConfig.WorkstationRole;
                     bool aiTtsChanged = Config.EnableAiTts != clonedConfig.EnableAiTts
                         || Config.AiTtsEngine != clonedConfig.AiTtsEngine;
 
@@ -815,8 +830,13 @@ namespace ExpressPackingMonitoring.ViewModels
                         else
                             _globalKeyHook.Stop();
                     }
+                    RefreshWorkstationStatus();
 
-                    if (cameraChanged)
+                    if (workstationChanged)
+                    {
+                        ShowToast("工位用途已保存，重启程序后生效");
+                    }
+                    else if (cameraChanged)
                     {
                         if (IsRecording)
                         {
@@ -1034,25 +1054,77 @@ namespace ExpressPackingMonitoring.ViewModels
 
         private void StartWebServer()
         {
-            if (!Config.EnableWebServer || _db == null) return;
+            if (!Config.EnableWebServer || _db == null)
+            {
+                MonitorAccessAddress = "";
+                WorkstationStatusText = "快递单打印工位：未连接";
+                WorkstationStatusToolTip = "其他电脑访问未启用。请在设置中开启。";
+                return;
+            }
             try
             {
                 _webServer = new WebServer(_db, Config.WebServerPort, Config.TranscodeCacheMaxMB, () => IsRecording, ConvertRecordMkvToMp4, () => _currentVideoFilePath);
                 _webServer.EnableOrderInfoLog = Config.EnableOrderInfoLog;
                 _webServer.OrderInfoReceived += OnOrderInfoReceived;
                 _webServer.Start();
+                RefreshWorkstationStatus();
                 Debug.WriteLine($"[Web] 局域网服务已启动 http://0.0.0.0:{Config.WebServerPort}");
             }
             catch (Exception ex)
             {
                 Debug.WriteLine($"[Web] 启动失败: {ex.Message}");
+                MonitorAccessAddress = "";
+                WorkstationStatusText = "快递单打印工位：Web 启动失败";
+                WorkstationStatusToolTip = $"其他电脑暂时无法连接这台摄像头监控工位。\n{ex.Message}";
                 ShowToast($"警告：局域网服务启动失败: {ex.Message}");
+            }
+        }
+
+        private void RefreshWorkstationStatus()
+        {
+            if (_webServer == null)
+            {
+                MonitorAccessAddress = "";
+                WorkstationStatusText = "快递单打印工位：未连接";
+                WorkstationStatusToolTip = "其他电脑暂时无法连接这台摄像头监控工位。";
+                return;
+            }
+
+            MonitorAccessAddress = WorkstationNetwork.GetBestLocalAccessAddress(Config.WebServerPort);
+            WorkstationStatusText = $"其他电脑可访问：{MonitorAccessAddress}    快递单打印工位：可连接";
+            WorkstationStatusToolTip = $"在快递单打印工位输入 {MonitorAccessAddress}，或直接用浏览器访问 http://{MonitorAccessAddress}";
+        }
+
+        private void CopyMonitorAddress()
+        {
+            if (string.IsNullOrWhiteSpace(MonitorAccessAddress))
+            {
+                ShowToast("当前没有可复制的访问地址");
+                return;
+            }
+            Clipboard.SetText(MonitorAccessAddress);
+            ShowToast("已复制监控工位地址");
+        }
+
+        private void SwitchWorkstation()
+        {
+            var selector = new WorkstationSelectionWindow { Owner = Application.Current?.MainWindow };
+            if (selector.ShowDialog() == true && !string.IsNullOrWhiteSpace(selector.SelectedRole))
+            {
+                Config.WorkstationRole = selector.SelectedRole;
+                SaveConfig();
+                ShowToast("工位用途已保存，重启程序后生效");
             }
         }
 
         /// <summary>收到油猴脚本推送的订单信息时，提前生成 TTS 缓存</summary>
         private void OnOrderInfoReceived(List<OrderInfo> orders)
         {
+            if (_webServer != null)
+            {
+                MonitorAccessAddress = WorkstationNetwork.GetBestLocalAccessAddress(Config.WebServerPort);
+                WorkstationStatusText = $"其他电脑可访问：{MonitorAccessAddress}    快递单打印工位：最近收到订单";
+            }
             if (_speechService == null || !Config.EnableOrderInfoAnnounce) return;
             foreach (var info in orders)
             {
