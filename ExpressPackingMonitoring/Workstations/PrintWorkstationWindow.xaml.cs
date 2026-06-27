@@ -135,6 +135,12 @@ public partial class PrintWorkstationWindow : Window
         var win = new WorkstationSelectionWindow { Owner = this };
         if (win.ShowDialog() == true && !string.IsNullOrWhiteSpace(win.SelectedRole))
         {
+            if (string.Equals(_config.WorkstationRole, win.SelectedRole, StringComparison.OrdinalIgnoreCase))
+            {
+                SetStatus($"当前已经是{WorkstationRoles.GetDisplayName(_config.WorkstationRole)}", "无需重启或切换。");
+                return;
+            }
+
             _config.WorkstationRole = win.SelectedRole;
             WorkstationConfigStore.Save(_config);
             WorkstationNetwork.AskRestart(this);

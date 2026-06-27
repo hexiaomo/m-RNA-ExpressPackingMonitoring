@@ -1140,6 +1140,12 @@ namespace ExpressPackingMonitoring.ViewModels
             var selector = new WorkstationSelectionWindow { Owner = Application.Current?.MainWindow };
             if (selector.ShowDialog() == true && !string.IsNullOrWhiteSpace(selector.SelectedRole))
             {
+                if (string.Equals(Config.WorkstationRole, selector.SelectedRole, StringComparison.OrdinalIgnoreCase))
+                {
+                    ShowToast($"当前已经是{WorkstationRoles.GetDisplayName(Config.WorkstationRole)}");
+                    return;
+                }
+
                 Config.WorkstationRole = selector.SelectedRole;
                 SaveConfig();
                 WorkstationNetwork.AskRestart(Application.Current?.MainWindow);
