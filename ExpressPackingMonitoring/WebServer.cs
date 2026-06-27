@@ -199,6 +199,12 @@ namespace ExpressPackingMonitoring
                     case "/api/storage":
                         HandleStorageOverview(ctx);
                         break;
+                    case "/kuaidizs-install-guide":
+                        ServeInstallGuidePage(ctx);
+                        break;
+                    case "/kuaidizs-order-push.user.js":
+                        ServeUserscript(ctx);
+                        break;
                     case "/api/orderinfo":
                         if (method == "POST")
                             HandlePushOrderInfo(ctx);
@@ -1131,6 +1137,38 @@ namespace ExpressPackingMonitoring
             ctx.Response.StatusCode = 200;
             ctx.Response.ContentType = "text/html; charset=utf-8";
             byte[] bytes = Encoding.UTF8.GetBytes(html);
+            ctx.Response.ContentLength64 = bytes.Length;
+            ctx.Response.OutputStream.Write(bytes, 0, bytes.Length);
+            ctx.Response.OutputStream.Close();
+        }
+
+        private static void ServeInstallGuidePage(HttpListenerContext ctx)
+        {
+            string authority = ctx.Request.Url?.Authority ?? $"127.0.0.1:{ctx.Request.LocalEndPoint?.Port ?? 5280}";
+            string scriptUrl = $"{ctx.Request.Url?.Scheme ?? "http"}://{authority}/kuaidizs-order-push.user.js";
+            string html = PrintToolInstallGuide.RenderForWeb(authority, scriptUrl);
+            ctx.Response.StatusCode = 200;
+            ctx.Response.ContentType = "text/html; charset=utf-8";
+            byte[] bytes = Encoding.UTF8.GetBytes(html);
+            ctx.Response.ContentLength64 = bytes.Length;
+            ctx.Response.OutputStream.Write(bytes, 0, bytes.Length);
+            ctx.Response.OutputStream.Close();
+        }
+
+        private static void ServeUserscript(HttpListenerContext ctx)
+        {
+            string scriptPath = PrintToolInstallGuide.ResolveUserscriptPath();
+            if (!File.Exists(scriptPath))
+            {
+                SendJson(ctx, 404, new { error = "userscript not found" });
+                return;
+            }
+
+            string script = File.ReadAllText(scriptPath, Encoding.UTF8);
+            ctx.Response.StatusCode = 200;
+            ctx.Response.ContentType = "application/javascript; charset=utf-8";
+            ctx.Response.Headers["Content-Disposition"] = "inline; filename=\"kuaidizs-order-push.user.js\"";
+            byte[] bytes = Encoding.UTF8.GetBytes(script);
             ctx.Response.ContentLength64 = bytes.Length;
             ctx.Response.OutputStream.Write(bytes, 0, bytes.Length);
             ctx.Response.OutputStream.Close();

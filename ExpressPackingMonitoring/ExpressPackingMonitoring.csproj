@@ -61,6 +61,10 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
     </Content>
+    <Content Include="Web\kuaidizs-install-guide.html">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
     <Content Include="..\Scripts\快递助手订单推送.user.js">
       <Link>Scripts\快递助手订单推送.user.js</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
@@ -91,6 +95,7 @@
     <Compile Include="Themes\ThemeManager.cs" />
     <Compile Include="VideoDatabase.cs" />
     <Compile Include="WebServer.cs" />
+    <Compile Include="Workstations\PrintToolInstallGuide.cs" />
     <Compile Include="Workstations\PrintWorkstationWindow.xaml.cs" />
     <Compile Include="Workstations\WorkstationLauncher.cs" />
     <Compile Include="Workstations\WorkstationSelectionWindow.xaml.cs" />

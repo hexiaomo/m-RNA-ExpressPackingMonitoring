@@ -254,13 +254,15 @@
                         <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
 
-                    <Border Grid.Column="0"
+                    <Border x:Name="StatusIconContainer"
+                            Grid.Column="0"
                             Width="42"
                             Height="42"
                             CornerRadius="13"
                             Background="{DynamicResource ControlBackground}"
                             VerticalAlignment="Top">
-                        <Path Data="{StaticResource FluentCheckIcon}"
+                        <Path x:Name="StatusIconPath"
+                              Data="{StaticResource FluentHourglassIcon}"
                               Width="22"
                               Height="22"
                               Stretch="Uniform"
