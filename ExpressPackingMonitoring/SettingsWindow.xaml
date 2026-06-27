@@ -154,6 +154,9 @@
         <Style TargetType="ComboBox">
             <Setter Property="Height" Value="36"/>
             <Setter Property="MinHeight" Value="36"/>
+            <Setter Property="MinWidth" Value="220"/>
+            <Setter Property="MaxWidth" Value="360"/>
+            <Setter Property="HorizontalAlignment" Value="Left"/>
             <Setter Property="Padding" Value="10,0"/>
             <Setter Property="Background" Value="{DynamicResource ControlBackground}"/>
             <Setter Property="BorderBrush" Value="{DynamicResource BorderStrong}"/>
@@ -354,6 +357,9 @@
         <Style TargetType="{x:Type xctk:IntegerUpDown}">
             <Setter Property="Height" Value="36"/>
             <Setter Property="MinHeight" Value="36"/>
+            <Setter Property="MinWidth" Value="120"/>
+            <Setter Property="MaxWidth" Value="220"/>
+            <Setter Property="HorizontalAlignment" Value="Left"/>
             <Setter Property="Padding" Value="10,0"/>
             <Setter Property="Foreground" Value="{DynamicResource TextPrimary}"/>
             <Setter Property="Background" Value="{DynamicResource ControlBackground}"/>
@@ -365,6 +371,9 @@
         <Style TargetType="{x:Type xctk:DoubleUpDown}">
             <Setter Property="Height" Value="36"/>
             <Setter Property="MinHeight" Value="36"/>
+            <Setter Property="MinWidth" Value="120"/>
+            <Setter Property="MaxWidth" Value="220"/>
+            <Setter Property="HorizontalAlignment" Value="Left"/>
             <Setter Property="Padding" Value="10,0"/>
             <Setter Property="Foreground" Value="{DynamicResource TextPrimary}"/>
             <Setter Property="Background" Value="{DynamicResource ControlBackground}"/>
@@ -715,7 +724,7 @@
 
                                     <Grid Style="{StaticResource SettingRowStyle}">
                                         <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="230"/>
+                                            <ColumnDefinition Width="300"/>
                                             <ColumnDefinition Width="*"/>
                                         </Grid.ColumnDefinitions>
                                         <StackPanel Margin="0,0,16,0">
@@ -744,7 +753,7 @@
 
                                     <Grid Style="{StaticResource SettingRowStyle}">
                                         <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="230"/>
+                                            <ColumnDefinition Width="300"/>
                                             <ColumnDefinition Width="*"/>
                                         </Grid.ColumnDefinitions>
                                         <StackPanel Margin="0,0,16,0">
@@ -766,7 +775,7 @@
 
                                     <Grid Style="{StaticResource SettingRowStyle}">
                                         <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="230"/>
+                                            <ColumnDefinition Width="300"/>
                                             <ColumnDefinition Width="*"/>
                                         </Grid.ColumnDefinitions>
                                         <StackPanel Margin="0,0,16,0">
@@ -784,7 +793,7 @@
 
                                     <Grid Style="{StaticResource SettingRowStyle}">
                                         <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="230"/>
+                                            <ColumnDefinition Width="300"/>
                                             <ColumnDefinition Width="*"/>
                                         </Grid.ColumnDefinitions>
                                         <StackPanel Margin="0,0,16,0">
@@ -803,7 +812,7 @@
                                     <Grid Style="{StaticResource SettingRowStyle}"
                                           IsEnabled="{Binding IsChecked, ElementName=AudioRecordCheckBox, TargetNullValue=False}">
                                         <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="230"/>
+                                            <ColumnDefinition Width="300"/>
                                             <ColumnDefinition Width="*"/>
                                         </Grid.ColumnDefinitions>
                                         <StackPanel Margin="0,0,16,0">
@@ -829,7 +838,7 @@
 
                                     <Grid Style="{StaticResource SettingRowStyle}">
                                         <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="230"/>
+                                            <ColumnDefinition Width="300"/>
                                             <ColumnDefinition Width="*"/>
                                         </Grid.ColumnDefinitions>
                                         <StackPanel Margin="0,0,16,0">
@@ -846,7 +855,7 @@
 
                                     <Grid Style="{StaticResource SettingRowStyle}">
                                         <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="230"/>
+                                            <ColumnDefinition Width="300"/>
                                             <ColumnDefinition Width="*"/>
                                         </Grid.ColumnDefinitions>
                                         <StackPanel Margin="0,0,16,0">
@@ -863,7 +872,7 @@
 
                                     <Grid Style="{StaticResource SettingRowStyle}">
                                         <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="230"/>
+                                            <ColumnDefinition Width="300"/>
                                             <ColumnDefinition Width="*"/>
                                         </Grid.ColumnDefinitions>
                                         <StackPanel Margin="0,0,16,0">
@@ -879,7 +888,7 @@
 
                                     <Grid Style="{StaticResource SettingRowStyle}" Margin="0,0,0,0">
                                         <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="230"/>
+                                            <ColumnDefinition Width="300"/>
                                             <ColumnDefinition Width="*"/>
                                         </Grid.ColumnDefinitions>
                                         <StackPanel Margin="0,0,16,0">
@@ -894,7 +903,7 @@
 
                                     <Grid Style="{StaticResource SettingRowStyle}" Margin="0,12,0,0">
                                         <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="230"/>
+                                            <ColumnDefinition Width="300"/>
                                             <ColumnDefinition Width="*"/>
                                         </Grid.ColumnDefinitions>
                                         <StackPanel Margin="0,0,16,0">
@@ -912,7 +921,7 @@
 
                                     <Grid Style="{StaticResource SettingRowStyle}" Margin="0,12,0,0">
                                         <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="230"/>
+                                            <ColumnDefinition Width="300"/>
                                             <ColumnDefinition Width="*"/>
                                         </Grid.ColumnDefinitions>
                                         <StackPanel Margin="0,0,16,0">
@@ -947,7 +956,7 @@
 
                                     <Grid Style="{StaticResource SettingRowStyle}">
                                         <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="230"/>
+                                            <ColumnDefinition Width="300"/>
                                             <ColumnDefinition Width="*"/>
                                         </Grid.ColumnDefinitions>
                                         <StackPanel Margin="0,0,16,0">
@@ -975,7 +984,7 @@
 
                                     <Grid Style="{StaticResource SettingRowStyle}">
                                         <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="230"/>
+                                            <ColumnDefinition Width="300"/>
                                             <ColumnDefinition Width="*"/>
                                         </Grid.ColumnDefinitions>
                                         <StackPanel Margin="0,0,16,0">
@@ -992,7 +1001,7 @@
 
                                     <Grid Style="{StaticResource SettingRowStyle}" Margin="0,0,0,8">
                                         <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="230"/>
+                                            <ColumnDefinition Width="300"/>
                                             <ColumnDefinition Width="*"/>
                                         </Grid.ColumnDefinitions>
                                         <StackPanel Margin="0,0,16,0">
@@ -1009,7 +1018,7 @@
 
                                     <Grid Style="{StaticResource SettingRowStyle}" Margin="0,0,0,0">
                                         <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="230"/>
+                                            <ColumnDefinition Width="300"/>
                                             <ColumnDefinition Width="*"/>
                                         </Grid.ColumnDefinitions>
                                         <StackPanel Margin="0,0,16,0">
@@ -1028,7 +1037,7 @@
 
                                     <Grid Style="{StaticResource SettingRowStyle}">
                                         <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="230"/>
+                                            <ColumnDefinition Width="300"/>
                                             <ColumnDefinition Width="*"/>
                                         </Grid.ColumnDefinitions>
                                         <StackPanel Margin="0,0,16,0">
@@ -1047,7 +1056,7 @@
                                     <Grid Style="{StaticResource SettingRowStyle}" Margin="0,0,0,0"
                                           IsEnabled="{Binding IsChecked, ElementName=ZoomAnimationCheckBox, TargetNullValue=False}">
                                         <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="230"/>
+                                            <ColumnDefinition Width="300"/>
                                             <ColumnDefinition Width="*"/>
                                         </Grid.ColumnDefinitions>
                                         <StackPanel Margin="0,0,16,0">
@@ -1082,7 +1091,7 @@
 
                                     <Grid Style="{StaticResource SettingRowStyle}">
                                         <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="230"/>
+                                            <ColumnDefinition Width="300"/>
                                             <ColumnDefinition Width="*"/>
                                         </Grid.ColumnDefinitions>
                                         <StackPanel Margin="0,0,16,0">
@@ -1099,7 +1108,7 @@
 
                                     <Grid Style="{StaticResource SettingRowStyle}" Margin="0,0,0,8">
                                         <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="230"/>
+                                            <ColumnDefinition Width="300"/>
                                             <ColumnDefinition Width="*"/>
                                         </Grid.ColumnDefinitions>
                                         <StackPanel Margin="0,0,16,0">
@@ -1117,7 +1126,7 @@
 
                                     <Grid Style="{StaticResource SettingRowStyle}" Margin="0,0,0,8">
                                         <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="230"/>
+                                            <ColumnDefinition Width="300"/>
                                             <ColumnDefinition Width="*"/>
                                         </Grid.ColumnDefinitions>
                                         <StackPanel Margin="0,0,16,0">
@@ -1137,7 +1146,7 @@
  Margin="0,0,0,8"
                                           IsEnabled="{Binding IsChecked, ElementName=AutoStopCheckBox, TargetNullValue=False}">
                                         <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="230"/>
+                                            <ColumnDefinition Width="300"/>
                                             <ColumnDefinition Width="*"/>
                                         </Grid.ColumnDefinitions>
                                         <StackPanel Margin="0,0,16,0">
@@ -1155,7 +1164,7 @@
 
                                     <Grid Style="{StaticResource SettingRowStyle}" Margin="0,0,0,8">
                                         <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="230"/>
+                                            <ColumnDefinition Width="300"/>
                                             <ColumnDefinition Width="*"/>
                                         </Grid.ColumnDefinitions>
                                         <StackPanel Margin="0,0,16,0">
@@ -1175,7 +1184,7 @@
                                           Margin="0,0,0,0"
                                           IsEnabled="{Binding IsChecked, ElementName=MaxDurationCheckBox, TargetNullValue=False}">
                                         <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="230"/>
+                                            <ColumnDefinition Width="300"/>
                                             <ColumnDefinition Width="*"/>
                                         </Grid.ColumnDefinitions>
                                         <StackPanel Margin="0,0,16,0">
@@ -1195,7 +1204,7 @@
 
                                     <Grid Style="{StaticResource SettingRowStyle}" Margin="0,0,0,0">
                                         <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="230"/>
+                                            <ColumnDefinition Width="300"/>
                                             <ColumnDefinition Width="*"/>
                                         </Grid.ColumnDefinitions>
                                         <StackPanel Margin="0,0,16,0">
@@ -1215,7 +1224,7 @@
 
                                     <Grid Style="{StaticResource SettingRowStyle}" Margin="0,0,0,8">
                                         <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="230"/>
+                                            <ColumnDefinition Width="300"/>
                                             <ColumnDefinition Width="*"/>
                                         </Grid.ColumnDefinitions>
                                         <StackPanel Margin="0,0,16,0">
@@ -1234,7 +1243,7 @@
                                     <Grid Style="{StaticResource SettingRowStyle}" Margin="0,0,0,0"
                                           IsEnabled="{Binding IsChecked, ElementName=CameraIdleCheckBox, TargetNullValue=False}">
                                         <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="230"/>
+                                            <ColumnDefinition Width="300"/>
                                             <ColumnDefinition Width="*"/>
                                         </Grid.ColumnDefinitions>
                                         <StackPanel Margin="0,0,16,0">
@@ -1370,7 +1379,7 @@
 
                                     <Grid Style="{StaticResource SettingRowStyle}" Margin="0">
                                         <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="230"/>
+                                            <ColumnDefinition Width="300"/>
                                             <ColumnDefinition Width="*"/>
                                         </Grid.ColumnDefinitions>
                                         <StackPanel Margin="0,0,16,0">
@@ -1446,7 +1455,7 @@
 
                                     <Grid Style="{StaticResource SettingRowStyle}" Margin="0,0,0,8">
                                         <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="230"/>
+                                            <ColumnDefinition Width="300"/>
                                             <ColumnDefinition Width="*"/>
                                         </Grid.ColumnDefinitions>
                                         <StackPanel Margin="0,0,16,0">
@@ -1465,7 +1474,7 @@
                                     <Grid Style="{StaticResource SettingRowStyle}" Margin="0,0,0,8"
                                           IsEnabled="{Binding IsChecked, ElementName=AiTtsCheckBox, TargetNullValue=False}">
                                         <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="230"/>
+                                            <ColumnDefinition Width="300"/>
                                             <ColumnDefinition Width="*"/>
                                         </Grid.ColumnDefinitions>
                                         <StackPanel Margin="0,0,16,0">
@@ -1486,7 +1495,7 @@
                                     <Grid Style="{StaticResource SettingRowStyle}" Margin="0,0,0,8"
                                           IsEnabled="{Binding IsChecked, ElementName=AiTtsCheckBox, TargetNullValue=False}">
                                         <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="230"/>
+                                            <ColumnDefinition Width="300"/>
                                             <ColumnDefinition Width="*"/>
                                         </Grid.ColumnDefinitions>
                                         <StackPanel Margin="0,0,16,0">
@@ -1505,7 +1514,7 @@
                                     <Grid Style="{StaticResource SettingRowStyle}" Margin="0,0,0,8"
                                           IsEnabled="{Binding IsChecked, ElementName=AiTtsCheckBox, TargetNullValue=False}">
                                         <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="230"/>
+                                            <ColumnDefinition Width="300"/>
                                             <ColumnDefinition Width="*"/>
                                         </Grid.ColumnDefinitions>
                                         <StackPanel Margin="0,0,16,0">
@@ -1524,7 +1533,7 @@
                                     <Grid Style="{StaticResource SettingRowStyle}" Margin="0,0,0,8"
                                           IsEnabled="{Binding IsChecked, ElementName=AiTtsCheckBox, TargetNullValue=False}">
                                         <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="230"/>
+                                            <ColumnDefinition Width="300"/>
                                             <ColumnDefinition Width="*"/>
                                         </Grid.ColumnDefinitions>
                                         <StackPanel Margin="0,0,16,0">
@@ -1545,7 +1554,7 @@
                                     <Grid Style="{StaticResource SettingRowStyle}" Margin="0,0,0,8"
                                           IsEnabled="{Binding IsChecked, ElementName=AiTtsCheckBox, TargetNullValue=False}">
                                         <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="230"/>
+                                            <ColumnDefinition Width="300"/>
                                             <ColumnDefinition Width="*"/>
                                         </Grid.ColumnDefinitions>
                                         <StackPanel Margin="0,0,16,0">
@@ -1566,7 +1575,7 @@
                                     <Grid Style="{StaticResource SettingRowStyle}" Margin="0,0,0,0"
                                           IsEnabled="{Binding IsChecked, ElementName=AiTtsCheckBox, TargetNullValue=False}">
                                         <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="230"/>
+                                            <ColumnDefinition Width="300"/>
                                             <ColumnDefinition Width="*"/>
                                         </Grid.ColumnDefinitions>
                                         <StackPanel Margin="0,0,16,0">
@@ -1649,7 +1658,7 @@
 
                                     <Grid Style="{StaticResource SettingRowStyle}" Margin="0,0,0,0">
                                         <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="230"/>
+                                            <ColumnDefinition Width="300"/>
                                             <ColumnDefinition Width="*"/>
                                         </Grid.ColumnDefinitions>
                                         <StackPanel Margin="0,0,16,0">
@@ -1676,7 +1685,7 @@
 
                                     <Grid Style="{StaticResource SettingRowStyle}" Margin="0,0,0,8">
                                         <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="230"/>
+                                            <ColumnDefinition Width="300"/>
                                             <ColumnDefinition Width="*"/>
                                         </Grid.ColumnDefinitions>
                                         <StackPanel Margin="0,0,16,0">
@@ -1693,7 +1702,7 @@
 
                                     <Grid Style="{StaticResource SettingRowStyle}" Margin="0,0,0,8">
                                         <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="230"/>
+                                            <ColumnDefinition Width="300"/>
                                             <ColumnDefinition Width="*"/>
                                         </Grid.ColumnDefinitions>
                                         <StackPanel Margin="0,0,16,0">
@@ -1711,7 +1720,7 @@
 
                                     <Grid Style="{StaticResource SettingRowStyle}" Margin="0,0,0,0">
                                         <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="230"/>
+                                            <ColumnDefinition Width="300"/>
                                             <ColumnDefinition Width="*"/>
                                         </Grid.ColumnDefinitions>
                                         <StackPanel Margin="0,0,16,0">
@@ -1729,7 +1738,7 @@
 
                                     <Grid Style="{StaticResource SettingRowStyle}" Margin="0,0,0,8">
                                         <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="230"/>
+                                            <ColumnDefinition Width="300"/>
                                             <ColumnDefinition Width="*"/>
                                         </Grid.ColumnDefinitions>
                                         <StackPanel Margin="0,0,16,0">
@@ -1747,7 +1756,7 @@
                                     <Grid Style="{StaticResource SettingRowStyle}" Margin="24,8,0,0"
                                           Visibility="{Binding Config.EnableOrderInfoAnnounce, Converter={StaticResource BoolToVisibility}}">
                                         <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="230"/>
+                                            <ColumnDefinition Width="300"/>
                                             <ColumnDefinition Width="*"/>
                                         </Grid.ColumnDefinitions>
                                         <TextBlock Text="播报买家留言" Style="{StaticResource FieldLabelStyle}"/>
@@ -1760,7 +1769,7 @@
                                     <Grid Style="{StaticResource SettingRowStyle}" Margin="24,8,0,0"
                                           Visibility="{Binding Config.EnableOrderInfoAnnounce, Converter={StaticResource BoolToVisibility}}">
                                         <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="230"/>
+                                            <ColumnDefinition Width="300"/>
                                             <ColumnDefinition Width="*"/>
                                         </Grid.ColumnDefinitions>
                                         <TextBlock Text="播报卖家备注" Style="{StaticResource FieldLabelStyle}"/>
@@ -1773,7 +1782,7 @@
                                     <Grid Style="{StaticResource SettingRowStyle}" Margin="24,8,0,0"
                                           Visibility="{Binding Config.EnableOrderInfoAnnounce, Converter={StaticResource BoolToVisibility}}">
                                         <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="230"/>
+                                            <ColumnDefinition Width="300"/>
                                             <ColumnDefinition Width="*"/>
                                         </Grid.ColumnDefinitions>
                                         <TextBlock Text="播报商品信息" Style="{StaticResource FieldLabelStyle}"/>
@@ -1786,7 +1795,7 @@
                                     <Grid Style="{StaticResource SettingRowStyle}" Margin="24,8,0,0"
                                           Visibility="{Binding Config.EnableOrderInfoAnnounce, Converter={StaticResource BoolToVisibility}}">
                                         <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="230"/>
+                                            <ColumnDefinition Width="300"/>
                                             <ColumnDefinition Width="*"/>
                                         </Grid.ColumnDefinitions>
                                         <StackPanel Margin="0,0,16,0">
@@ -1812,7 +1821,7 @@
 
                                     <Grid Style="{StaticResource SettingRowStyle}" Margin="0,0,0,8">
                                         <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="230"/>
+                                            <ColumnDefinition Width="300"/>
                                             <ColumnDefinition Width="*"/>
                                         </Grid.ColumnDefinitions>
                                         <StackPanel Margin="0,0,16,0">
@@ -1829,7 +1838,7 @@
 
                                     <Grid Style="{StaticResource SettingRowStyle}">
                                         <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="230"/>
+                                            <ColumnDefinition Width="300"/>
                                             <ColumnDefinition Width="*"/>
                                         </Grid.ColumnDefinitions>
                                         <StackPanel Margin="0,0,16,0">
@@ -1842,7 +1851,7 @@
 
                                     <Grid Style="{StaticResource SettingRowStyle}">
                                         <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="230"/>
+                                            <ColumnDefinition Width="300"/>
                                             <ColumnDefinition Width="*"/>
                                         </Grid.ColumnDefinitions>
                                         <StackPanel Margin="0,0,16,0">
@@ -1860,7 +1869,7 @@
 
                                     <Grid Style="{StaticResource SettingRowStyle}" Margin="0,0,0,0">
                                         <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="230"/>
+                                            <ColumnDefinition Width="300"/>
                                             <ColumnDefinition Width="*"/>
                                         </Grid.ColumnDefinitions>
                                         <StackPanel Margin="0,0,16,0">
@@ -1879,7 +1888,7 @@
                                     <Border Height="1" Background="{DynamicResource BorderLight}" Margin="0,12,0,12"/>
                                     <Grid Style="{StaticResource SettingRowStyle}" Margin="0,0,0,0">
                                         <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="230"/>
+                                            <ColumnDefinition Width="300"/>
                                             <ColumnDefinition Width="*"/>
                                         </Grid.ColumnDefinitions>
                                         <StackPanel Margin="0,0,16,0">
@@ -1913,7 +1922,7 @@
 
                                     <Grid Style="{StaticResource SettingRowStyle}" Margin="0,0,0,12">
                                         <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="230"/>
+                                            <ColumnDefinition Width="300"/>
                                             <ColumnDefinition Width="*"/>
                                         </Grid.ColumnDefinitions>
                                         <StackPanel Margin="0,0,16,0">
