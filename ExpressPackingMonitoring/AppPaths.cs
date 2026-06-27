@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using Microsoft.Data.Sqlite;
 
 namespace ExpressPackingMonitoring
 {
@@ -70,9 +71,7 @@ namespace ExpressPackingMonitoring
             foreach (string legacyRoot in GetLegacyRuntimeRoots())
             {
                 MoveFileIfDestinationMissing(Path.Combine(legacyRoot, "config.json"), ConfigPath);
-                MoveFileIfDestinationMissing(Path.Combine(legacyRoot, "videos.db"), VideoDatabasePath);
-                MoveFileIfDestinationMissing(Path.Combine(legacyRoot, "videos.db-wal"), VideoDatabasePath + "-wal");
-                MoveFileIfDestinationMissing(Path.Combine(legacyRoot, "videos.db-shm"), VideoDatabasePath + "-shm");
+                MigrateLegacyVideoDatabase(legacyRoot);
                 MoveFileIfDestinationMissing(Path.Combine(legacyRoot, "orderinfo_cache.json"), OrderInfoCachePath);
                 MoveFileIfDestinationMissing(Path.Combine(legacyRoot, "web_debug.log"), WebDebugLogPath);
                 MoveFileIfDestinationMissing(Path.Combine(legacyRoot, "encoder_detect.log"), EncoderDetectLogPath);
@@ -80,6 +79,193 @@ namespace ExpressPackingMonitoring
                 MoveDirectoryContents(Path.Combine(legacyRoot, "transcache"), TranscodeCacheDir);
                 MoveDirectoryContents(Path.Combine(legacyRoot, "tts_cache"), TtsCacheDir);
             }
+        }
+
+        private static void MigrateLegacyVideoDatabase(string legacyRoot)
+        {
+            string legacyDbPath = Path.Combine(legacyRoot, "videos.db");
+            try
+            {
+                if (!File.Exists(legacyDbPath)) return;
+                if (string.Equals(Path.GetFullPath(legacyDbPath), Path.GetFullPath(VideoDatabasePath), StringComparison.OrdinalIgnoreCase)) return;
+
+                if (!File.Exists(VideoDatabasePath))
+                {
+                    MoveFileIfDestinationMissing(legacyDbPath, VideoDatabasePath);
+                    MoveFileIfDestinationMissing(legacyDbPath + "-wal", VideoDatabasePath + "-wal");
+                    MoveFileIfDestinationMissing(legacyDbPath + "-shm", VideoDatabasePath + "-shm");
+                    return;
+                }
+
+                string backupDir = CreateBackupDirectory("legacy-videos-db");
+                CopySqliteFileSet(VideoDatabasePath, Path.Combine(backupDir, "appdata-before-merge"));
+                CopySqliteFileSet(legacyDbPath, Path.Combine(backupDir, "legacy-before-merge"));
+
+                int inserted = MergeVideoRecords(legacyDbPath, VideoDatabasePath);
+                WriteMigrationMarker(backupDir, legacyRoot, inserted);
+
+                MoveSqliteFileSetToDirectory(legacyDbPath, backupDir, "legacy");
+            }
+            catch
+            {
+                // 迁移失败不能阻止主程序启动；旧库保留在原位置，后续启动仍可重试。
+            }
+        }
+
+        private static int MergeVideoRecords(string legacyDbPath, string destinationDbPath)
+        {
+            using var connection = new SqliteConnection($"Data Source={destinationDbPath}");
+            connection.Open();
+
+            ExecuteSql(connection, "PRAGMA busy_timeout=5000;");
+            EnsureVideoMergeColumns(connection, "main");
+            if (!TableExists(connection, "main", "VideoRecords"))
+                throw new InvalidDataException("Destination video database has no VideoRecords table.");
+
+            string escapedLegacyPath = legacyDbPath.Replace("'", "''");
+            ExecuteSql(connection, $"ATTACH DATABASE '{escapedLegacyPath}' AS legacy;");
+            try
+            {
+                if (!TableExists(connection, "legacy", "VideoRecords"))
+                    return 0;
+
+                EnsureVideoMergeColumns(connection, "legacy");
+                string sourceColumns = string.Join(", ", VideoMergeColumns.Select(c => $"s.{c}"));
+                string targetColumns = string.Join(", ", VideoMergeColumns);
+
+                using var cmd = connection.CreateCommand();
+                cmd.CommandText = $@"
+                    INSERT INTO main.VideoRecords ({targetColumns})
+                    SELECT {sourceColumns}
+                    FROM legacy.VideoRecords s
+                    WHERE NOT EXISTS (
+                        SELECT 1
+                        FROM main.VideoRecords d
+                        WHERE d.FilePath = s.FilePath
+                           OR (d.FileName = s.FileName AND d.StartTime = s.StartTime)
+                    );";
+                return cmd.ExecuteNonQuery();
+            }
+            finally
+            {
+                ExecuteSql(connection, "DETACH DATABASE legacy;");
+            }
+        }
+
+        private static readonly string[] VideoMergeColumns =
+        {
+            "OrderId",
+            "Mode",
+            "VideoCodec",
+            "VideoEncoder",
+            "FilePath",
+            "FileName",
+            "FileSizeBytes",
+            "StartTime",
+            "EndTime",
+            "DurationSeconds",
+            "StopReason",
+            "IsDeleted",
+            "DeletedAt",
+            "DeleteReason"
+        };
+
+        private static void EnsureVideoMergeColumns(SqliteConnection connection, string schema)
+        {
+            if (!TableExists(connection, schema, "VideoRecords"))
+                return;
+
+            var columns = GetTableColumns(connection, schema, "VideoRecords");
+            var definitions = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["VideoCodec"] = "TEXT DEFAULT ''",
+                ["VideoEncoder"] = "TEXT DEFAULT ''",
+                ["IsDeleted"] = "INTEGER DEFAULT 0",
+                ["DeletedAt"] = "TEXT",
+                ["DeleteReason"] = "TEXT DEFAULT ''"
+            };
+
+            foreach (var definition in definitions)
+            {
+                if (columns.Contains(definition.Key)) continue;
+                ExecuteSql(connection, $"ALTER TABLE {schema}.VideoRecords ADD COLUMN {definition.Key} {definition.Value};");
+            }
+        }
+
+        private static bool TableExists(SqliteConnection connection, string schema, string tableName)
+        {
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = $"SELECT COUNT(1) FROM {schema}.sqlite_master WHERE type='table' AND name=$name;";
+            cmd.Parameters.AddWithValue("$name", tableName);
+            return Convert.ToInt32(cmd.ExecuteScalar()) > 0;
+        }
+
+        private static HashSet<string> GetTableColumns(SqliteConnection connection, string schema, string tableName)
+        {
+            var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = $"PRAGMA {schema}.table_info('{tableName.Replace("'", "''")}');";
+            using var reader = cmd.ExecuteReader();
+            while (reader.Read())
+                result.Add(reader.GetString(1));
+            return result;
+        }
+
+        private static void ExecuteSql(SqliteConnection connection, string sql)
+        {
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = sql;
+            cmd.ExecuteNonQuery();
+        }
+
+        private static string CreateBackupDirectory(string prefix)
+        {
+            string baseName = $"{prefix}-{DateTime.Now:yyyyMMdd-HHmmss}";
+            string dir = Path.Combine(BackupsDir, baseName);
+            int suffix = 1;
+            while (Directory.Exists(dir))
+            {
+                suffix++;
+                dir = Path.Combine(BackupsDir, $"{baseName}-{suffix}");
+            }
+            Directory.CreateDirectory(dir);
+            return dir;
+        }
+
+        private static void CopySqliteFileSet(string dbPath, string destinationPrefix)
+        {
+            CopyFileIfExists(dbPath, destinationPrefix + ".db");
+            CopyFileIfExists(dbPath + "-wal", destinationPrefix + ".db-wal");
+            CopyFileIfExists(dbPath + "-shm", destinationPrefix + ".db-shm");
+        }
+
+        private static void MoveSqliteFileSetToDirectory(string dbPath, string destinationDir, string prefix)
+        {
+            MoveFileIfExists(dbPath, Path.Combine(destinationDir, prefix + ".db"));
+            MoveFileIfExists(dbPath + "-wal", Path.Combine(destinationDir, prefix + ".db-wal"));
+            MoveFileIfExists(dbPath + "-shm", Path.Combine(destinationDir, prefix + ".db-shm"));
+        }
+
+        private static void CopyFileIfExists(string sourcePath, string destinationPath)
+        {
+            if (!File.Exists(sourcePath)) return;
+            Directory.CreateDirectory(Path.GetDirectoryName(destinationPath)!);
+            File.Copy(sourcePath, destinationPath, overwrite: true);
+        }
+
+        private static void MoveFileIfExists(string sourcePath, string destinationPath)
+        {
+            if (!File.Exists(sourcePath)) return;
+            Directory.CreateDirectory(Path.GetDirectoryName(destinationPath)!);
+            if (File.Exists(destinationPath)) File.Delete(destinationPath);
+            File.Move(sourcePath, destinationPath);
+        }
+
+        private static void WriteMigrationMarker(string backupDir, string legacyRoot, int inserted)
+        {
+            string markerPath = Path.Combine(backupDir, "merge-summary.txt");
+            File.WriteAllText(markerPath,
+                $"LegacyRoot={legacyRoot}{Environment.NewLine}InsertedVideoRecords={inserted}{Environment.NewLine}MergedAt={DateTime.Now:yyyy-MM-dd HH:mm:ss}{Environment.NewLine}");
         }
 
         private static IEnumerable<string> GetLegacyRuntimeRoots()
