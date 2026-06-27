@@ -1,4 +1,6 @@
 using System.IO;
+using System.Net;
+using System.Text;
 using System.Windows;
 using ExpressPackingMonitoring.ViewModels;
 
@@ -113,14 +115,133 @@ public partial class PrintWorkstationWindow : Window
 
     private void InstallTool_Click(object sender, RoutedEventArgs e)
     {
-        string scriptPath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "Scripts", "快递助手订单推送.user.js"));
-        if (!File.Exists(scriptPath))
-            scriptPath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "Scripts", "快递助手订单推送.user.js"));
+        string address = WorkstationNetwork.NormalizeAddress(AddressTextBox.Text);
+        string guidePath = CreateInstallGuide(address);
+        if (!string.IsNullOrWhiteSpace(address))
+        {
+            try { Clipboard.SetDataObject(address, true); } catch { }
+        }
 
-        WorkstationNetwork.OpenUrl("https://www.tampermonkey.net/");
-        if (File.Exists(scriptPath))
-            WorkstationNetwork.OpenUrl(scriptPath);
-        SetStatus("已打开安装页面", "安装脚本后，请在脚本菜单里填写摄像头监控工位地址。");
+        WorkstationNetwork.OpenUrl(new Uri(guidePath).AbsoluteUri);
+        SetStatus("已打开安装向导", string.IsNullOrWhiteSpace(address)
+            ? "请先连接摄像头监控工位，再按向导安装联动工具。"
+            : $"已复制监控工位地址：{address}");
+    }
+
+    private static string ResolveUserscriptPath()
+    {
+        string[] candidates =
+        {
+            Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "Scripts", "快递助手订单推送.user.js")),
+            Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "Scripts", "快递助手订单推送.user.js")),
+            Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "Scripts", "快递助手订单推送.user.js"))
+        };
+
+        return candidates.FirstOrDefault(File.Exists) ?? candidates[0];
+    }
+
+    private static string CreateInstallGuide(string monitorAddress)
+    {
+        string guideDir = Path.Combine(AppPaths.LogDir, "guide");
+        Directory.CreateDirectory(guideDir);
+        string guidePath = Path.Combine(guideDir, "kuaidizs-install-guide.html");
+        string scriptPath = ResolveUserscriptPath();
+        string scriptUrl = File.Exists(scriptPath) ? new Uri(scriptPath).AbsoluteUri : "";
+        string address = WebUtility.HtmlEncode(monitorAddress);
+        string scriptLink = string.IsNullOrWhiteSpace(scriptUrl)
+            ? "<div class=\"warn\">未找到联动脚本文件，请确认发布包内包含 Scripts 文件夹。</div>"
+            : $"<a class=\"primary\" href=\"{WebUtility.HtmlEncode(scriptUrl)}\">打开联动脚本安装页</a>";
+
+        string html = $$"""
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>快递助手联动工具安装向导</title>
+  <style>
+    body{font-family:"Microsoft YaHei UI","Segoe UI",sans-serif;margin:0;background:#f5f7fb;color:#172033}
+    main{max-width:900px;margin:28px auto;padding:0 20px}
+    .card{background:#fff;border:1px solid #d8e0ec;border-radius:12px;padding:24px;box-shadow:0 10px 30px rgba(26,40,70,.08)}
+    h1{font-size:26px;margin:0 0 8px}
+    p{line-height:1.7;color:#516071}
+    .steps{display:grid;gap:14px;margin-top:22px;counter-reset:step}
+    .step{border:1px solid #e3e8f0;border-radius:10px;padding:16px;background:#fbfcff;display:grid;grid-template-columns:42px 1fr;gap:14px}
+    .num{width:34px;height:34px;border-radius:50%;background:#1f78ff;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800}
+    .step h2{font-size:18px;margin:3px 0 8px}
+    .actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:10px}
+    a.primary,button{display:inline-flex;align-items:center;justify-content:center;min-height:40px;padding:0 16px;border-radius:8px;border:0;background:#1f78ff;color:#fff;text-decoration:none;font-weight:700;cursor:pointer}
+    a.secondary{display:inline-flex;align-items:center;justify-content:center;min-height:40px;padding:0 16px;border-radius:8px;border:1px solid #ccd6e4;color:#172033;text-decoration:none;font-weight:700;background:#fff}
+    code{font-size:18px;background:#eef4ff;border:1px solid #cdddf5;border-radius:8px;padding:10px 12px;display:inline-block;color:#0c4fb3;margin-right:10px}
+    .warn{color:#a44800;background:#fff6e8;border:1px solid #f0c98e;border-radius:8px;padding:12px}
+    .hint{font-size:13px;color:#6b7788;margin-top:10px}
+    .check{margin:8px 0 0 0;padding-left:20px;color:#39475a;line-height:1.7}
+  </style>
+</head>
+<body>
+<main>
+  <div class="card">
+    <h1>快递助手联动工具安装向导</h1>
+    <p>按下面步骤操作。安装完成后，在快递助手打印订单时，订单信息会自动发送到摄像头监控工位。</p>
+    <div class="steps">
+      <div class="step">
+        <div class="num">1</div>
+        <div>
+          <h2>安装 Tampermonkey / 篡改猴</h2>
+          <p>先给浏览器安装脚本管理扩展。如果已经安装过，可以跳过这一步。</p>
+          <div class="actions">
+            <a class="primary" href="https://chromewebstore.google.com/detail/tampermonkey/dhdgffkkebhmkfjojejmpbldmpobfkfo">Chrome 安装</a>
+            <a class="secondary" href="https://microsoftedge.microsoft.com/addons/detail/tampermonkey/iikmkjmpaadaobahmlepeloendndfphd">Edge 安装</a>
+            <a class="secondary" href="https://www.tampermonkey.net/">其他浏览器</a>
+          </div>
+        </div>
+      </div>
+      <div class="step">
+        <div class="num">2</div>
+        <div>
+          <h2>打开浏览器的用户脚本权限</h2>
+          <p>Chrome / Edge 新版本需要在扩展详情里打开“允许用户脚本”；如果没有这个开关，就打开右上角“开发者模式”。本地安装脚本时，也建议打开“允许访问文件网址”。</p>
+          <ul class="check">
+            <li>打开浏览器扩展管理页面，找到 Tampermonkey / 篡改猴。</li>
+            <li>进入“详情”，打开“允许用户脚本”。</li>
+            <li>如果没有“允许用户脚本”，打开扩展页右上角“开发者模式”。</li>
+            <li>如果有“允许访问文件网址”，也一起打开。</li>
+          </ul>
+          <div class="actions">
+            <a class="secondary" href="chrome://extensions/">打开 Chrome 扩展页</a>
+            <a class="secondary" href="edge://extensions/">打开 Edge 扩展页</a>
+            <a class="secondary" href="https://www.tampermonkey.net/faq.php?locale=zh&q=Q209">查看图文说明</a>
+          </div>
+          <div class="hint">如果按钮打不开，可以在浏览器地址栏手动输入 chrome://extensions/ 或 edge://extensions/。</div>
+        </div>
+      </div>
+      <div class="step">
+        <div class="num">3</div>
+        <div>
+          <h2>安装快递助手联动脚本</h2>
+          <p>请点击下面按钮，让 Tampermonkey 打开脚本安装页。不要用记事本、Visual Studio 或脚本宿主打开这个文件。</p>
+          <div class="actions">{{scriptLink}}</div>
+          <div class="hint">如果浏览器只显示代码，请确认第 1 步已安装 Tampermonkey，并完成第 2 步的权限开关。</div>
+        </div>
+      </div>
+      <div class="step">
+        <div class="num">4</div>
+        <div>
+          <h2>填写摄像头监控工位地址</h2>
+          <p>程序已尝试把这个地址复制到剪贴板。脚本里要求填写地址时，直接粘贴即可。</p>
+          <code id="addr">{{address}}</code>
+          <button onclick="navigator.clipboard && navigator.clipboard.writeText(document.getElementById('addr').textContent)">复制地址</button>
+          <div class="hint">如果这里为空，请先回到打印工位窗口连接摄像头监控工位。</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</main>
+</body>
+</html>
+""";
+        File.WriteAllText(guidePath, html, Encoding.UTF8);
+        return guidePath;
     }
 
     private async void TestSend_Click(object sender, RoutedEventArgs e)
