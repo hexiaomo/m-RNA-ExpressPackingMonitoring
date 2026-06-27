@@ -6,6 +6,7 @@ using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
+using System.Windows;
 using ExpressPackingMonitoring.ViewModels;
 
 namespace ExpressPackingMonitoring;
@@ -146,6 +147,44 @@ public static class WorkstationNetwork
     public static void OpenUrl(string url)
     {
         Process.Start(new ProcessStartInfo { FileName = url, UseShellExecute = true });
+    }
+
+    public static bool TryRestartApplication()
+    {
+        try
+        {
+            string? exePath = Environment.ProcessPath;
+            if (string.IsNullOrWhiteSpace(exePath) || !File.Exists(exePath))
+                exePath = Process.GetCurrentProcess().MainModule?.FileName;
+            if (string.IsNullOrWhiteSpace(exePath) || !File.Exists(exePath))
+                return false;
+
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = exePath,
+                WorkingDirectory = AppContext.BaseDirectory,
+                UseShellExecute = true
+            });
+            Application.Current.Shutdown();
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    public static void AskRestart(Window? owner = null)
+    {
+        var result = MessageBox.Show(owner,
+            "工位用途已保存，需要重启程序后生效。\n\n是否立即重启？",
+            "切换工位",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Question);
+        if (result == MessageBoxResult.Yes && !TryRestartApplication())
+        {
+            MessageBox.Show(owner, "自动重启失败，请手动关闭后重新打开程序。", "切换工位", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
     }
 
     private static IEnumerable<string> GetLocalIpv4Prefixes()

@@ -173,7 +173,8 @@ namespace ExpressPackingMonitoring.ViewModels
         private bool _maxDurationWarned = false;
         private bool _pendingCameraRestart = false; // 录制中修改了摄像头配置，录制结束后重启
         private bool _isEncoderDetectRunning = true; // 是否正在进行 GPU 编码器检测
-        private string _workstationStatusText = "其他电脑暂时无法连接";
+        private string _workstationAccessText = "其他电脑暂时无法连接";
+        private string _workstationPrintStatusText = "快递单打印工位：未连接";
         private string _workstationStatusToolTip = "";
         private string _monitorAccessAddress = "";
 
@@ -215,7 +216,8 @@ namespace ExpressPackingMonitoring.ViewModels
         public double DiskUsagePercent { get => _diskUsagePercent; set => SetProperty(ref _diskUsagePercent, value); }
         public string DiskUsageText { get => _diskUsageText; set => SetProperty(ref _diskUsageText, value); }
         public AppConfig Config { get => _config; set => SetProperty(ref _config, value); }
-        public string WorkstationStatusText { get => _workstationStatusText; set => SetProperty(ref _workstationStatusText, value); }
+        public string WorkstationAccessText { get => _workstationAccessText; set => SetProperty(ref _workstationAccessText, value); }
+        public string WorkstationPrintStatusText { get => _workstationPrintStatusText; set => SetProperty(ref _workstationPrintStatusText, value); }
         public string WorkstationStatusToolTip { get => _workstationStatusToolTip; set => SetProperty(ref _workstationStatusToolTip, value); }
         public string MonitorAccessAddress { get => _monitorAccessAddress; set => SetProperty(ref _monitorAccessAddress, value); }
 
@@ -834,7 +836,7 @@ namespace ExpressPackingMonitoring.ViewModels
 
                     if (workstationChanged)
                     {
-                        ShowToast("工位用途已保存，重启程序后生效");
+                        WorkstationNetwork.AskRestart(Application.Current?.MainWindow);
                     }
                     else if (cameraChanged)
                     {
@@ -1057,7 +1059,8 @@ namespace ExpressPackingMonitoring.ViewModels
             if (!Config.EnableWebServer || _db == null)
             {
                 MonitorAccessAddress = "";
-                WorkstationStatusText = "快递单打印工位：未连接";
+                WorkstationAccessText = "其他电脑访问：未启用";
+                WorkstationPrintStatusText = "快递单打印工位：未连接";
                 WorkstationStatusToolTip = "其他电脑访问未启用。请在设置中开启。";
                 return;
             }
@@ -1074,7 +1077,8 @@ namespace ExpressPackingMonitoring.ViewModels
             {
                 Debug.WriteLine($"[Web] 启动失败: {ex.Message}");
                 MonitorAccessAddress = "";
-                WorkstationStatusText = "快递单打印工位：Web 启动失败";
+                WorkstationAccessText = "其他电脑访问：暂时不可用";
+                WorkstationPrintStatusText = "快递单打印工位：Web 启动失败";
                 WorkstationStatusToolTip = $"其他电脑暂时无法连接这台摄像头监控工位。\n{ex.Message}";
                 ShowToast($"警告：局域网服务启动失败: {ex.Message}");
             }
@@ -1085,13 +1089,15 @@ namespace ExpressPackingMonitoring.ViewModels
             if (_webServer == null)
             {
                 MonitorAccessAddress = "";
-                WorkstationStatusText = "快递单打印工位：未连接";
+                WorkstationAccessText = "其他电脑访问：暂时不可用";
+                WorkstationPrintStatusText = "快递单打印工位：未连接";
                 WorkstationStatusToolTip = "其他电脑暂时无法连接这台摄像头监控工位。";
                 return;
             }
 
             MonitorAccessAddress = WorkstationNetwork.GetBestLocalAccessAddress(Config.WebServerPort);
-            WorkstationStatusText = $"其他电脑可访问：{MonitorAccessAddress}    快递单打印工位：可连接";
+            WorkstationAccessText = $"其他电脑访问：{MonitorAccessAddress}";
+            WorkstationPrintStatusText = "快递单打印工位：可连接";
             WorkstationStatusToolTip = $"在快递单打印工位输入 {MonitorAccessAddress}，或直接用浏览器访问 http://{MonitorAccessAddress}";
         }
 
@@ -1102,8 +1108,24 @@ namespace ExpressPackingMonitoring.ViewModels
                 ShowToast("当前没有可复制的访问地址");
                 return;
             }
-            Clipboard.SetText(MonitorAccessAddress);
-            ShowToast("已复制监控工位地址");
+
+            string url = WorkstationNetwork.ToUrl(MonitorAccessAddress);
+            bool copied = false;
+            for (int i = 0; i < 3 && !copied; i++)
+            {
+                try
+                {
+                    Clipboard.SetText(url);
+                    copied = true;
+                }
+                catch
+                {
+                    Thread.Sleep(80);
+                }
+            }
+
+            WorkstationNetwork.OpenUrl(url);
+            ShowToast(copied ? "已复制并打开监控网页" : "已打开监控网页，复制失败请重试");
         }
 
         private void SwitchWorkstation()
@@ -1113,7 +1135,7 @@ namespace ExpressPackingMonitoring.ViewModels
             {
                 Config.WorkstationRole = selector.SelectedRole;
                 SaveConfig();
-                ShowToast("工位用途已保存，重启程序后生效");
+                WorkstationNetwork.AskRestart(Application.Current?.MainWindow);
             }
         }
 
@@ -1123,7 +1145,8 @@ namespace ExpressPackingMonitoring.ViewModels
             if (_webServer != null)
             {
                 MonitorAccessAddress = WorkstationNetwork.GetBestLocalAccessAddress(Config.WebServerPort);
-                WorkstationStatusText = $"其他电脑可访问：{MonitorAccessAddress}    快递单打印工位：最近收到订单";
+                WorkstationAccessText = $"其他电脑访问：{MonitorAccessAddress}";
+                WorkstationPrintStatusText = "快递单打印工位：最近收到订单";
             }
             if (_speechService == null || !Config.EnableOrderInfoAnnounce) return;
             foreach (var info in orders)

@@ -14,17 +14,17 @@ public partial class PrintWorkstationWindow : Window
         InitializeComponent();
         _config = config;
         AddressTextBox.Text = WorkstationNetwork.NormalizeAddress(_config.PrintStationMonitorAddress);
-        Loaded += async (_, __) => await ReconnectAsync(false);
+        Loaded += async (_, __) => await AutoConnectAndOpenAsync();
     }
 
-    private async Task ReconnectAsync(bool save)
+    private async Task<bool> ReconnectAsync(bool save, bool openWhenConnected = false)
     {
         string address = WorkstationNetwork.NormalizeAddress(AddressTextBox.Text);
         AddressTextBox.Text = address;
         if (string.IsNullOrWhiteSpace(address))
         {
             SetStatus("未连接摄像头监控工位", "请自动查找，或输入摄像头监控工位底部状态栏显示的地址。");
-            return;
+            return false;
         }
 
         SetStatus("正在连接摄像头监控工位...", address);
@@ -37,11 +37,28 @@ public partial class PrintWorkstationWindow : Window
                 WorkstationConfigStore.Save(_config);
             }
             SetStatus("已连接到摄像头监控工位", $"已记住地址：{address}");
+            if (openWhenConnected)
+                WorkstationNetwork.OpenUrl(WorkstationNetwork.ToUrl(address));
+            return true;
         }
         else
         {
             SetStatus("未找到摄像头监控工位", "请确认摄像头监控工位已打开，并且两台电脑在同一局域网。");
+            return false;
         }
+    }
+
+    private async Task AutoConnectAndOpenAsync()
+    {
+        string savedAddress = WorkstationNetwork.NormalizeAddress(_config.PrintStationMonitorAddress);
+        if (!string.IsNullOrWhiteSpace(savedAddress))
+        {
+            AddressTextBox.Text = savedAddress;
+            if (await ReconnectAsync(true, openWhenConnected: true))
+                return;
+        }
+
+        await FindMonitorAsync(openWhenFound: true);
     }
 
     private void SetStatus(string title, string hint)
@@ -50,9 +67,14 @@ public partial class PrintWorkstationWindow : Window
         StatusHintTextBlock.Text = hint;
     }
 
-    private async void Reconnect_Click(object sender, RoutedEventArgs e) => await ReconnectAsync(true);
+    private async void Reconnect_Click(object sender, RoutedEventArgs e) => await ReconnectAsync(true, openWhenConnected: true);
 
     private async void FindMonitor_Click(object sender, RoutedEventArgs e)
+    {
+        await FindMonitorAsync(openWhenFound: true);
+    }
+
+    private async Task FindMonitorAsync(bool openWhenFound)
     {
         _findCts?.Cancel();
         _findCts = new CancellationTokenSource();
@@ -69,7 +91,7 @@ public partial class PrintWorkstationWindow : Window
             }
 
             AddressTextBox.Text = address;
-            await ReconnectAsync(true);
+            await ReconnectAsync(true, openWhenConnected: openWhenFound);
         }
         catch (OperationCanceledException)
         {
@@ -115,7 +137,7 @@ public partial class PrintWorkstationWindow : Window
         {
             _config.WorkstationRole = win.SelectedRole;
             WorkstationConfigStore.Save(_config);
-            MessageBox.Show("工位已切换，重启程序后生效。", "切换工位", MessageBoxButton.OK, MessageBoxImage.Information);
+            WorkstationNetwork.AskRestart(this);
         }
     }
 }
