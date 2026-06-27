@@ -332,6 +332,8 @@ namespace ExpressPackingMonitoring
 
                 // 持久化到磁盘
                 SaveOrderInfoCache();
+                _db.UpsertOrderInfos(items);
+                _db.UpdateRecentVideoOrderInfos(items);
 
                 // 通知订阅方预生成语音缓存
                 try { OrderInfoReceived?.Invoke(items); } catch { }
@@ -693,6 +695,12 @@ namespace ExpressPackingMonitoring
             {
                 r.Id,
                 r.OrderId,
+                trackingNumber = r.TrackingNumber ?? "",
+                sourceOrderId = r.SourceOrderId ?? "",
+                buyerMessage = r.BuyerMessage ?? "",
+                sellerMemo = r.SellerMemo ?? "",
+                productInfo = r.ProductInfo ?? "",
+                orderInfoPushTime = r.OrderInfoPushTime?.ToString("yyyy-MM-dd HH:mm:ss") ?? "",
                 r.Mode,
                 r.FileName,
                 videoCodec = r.VideoCodec ?? "",

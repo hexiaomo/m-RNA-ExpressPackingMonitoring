@@ -157,6 +157,13 @@ namespace ExpressPackingMonitoring
         {
             "OrderId",
             "Mode",
+            "TrackingNumber",
+            "SourceOrderId",
+            "BuyerMessage",
+            "SellerMemo",
+            "ProductInfo",
+            "OrderInfoPushTime",
+            "OrderInfoJson",
             "VideoCodec",
             "VideoEncoder",
             "FilePath",
@@ -179,6 +186,13 @@ namespace ExpressPackingMonitoring
             var columns = GetTableColumns(connection, schema, "VideoRecords");
             var definitions = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
             {
+                ["TrackingNumber"] = "TEXT DEFAULT ''",
+                ["SourceOrderId"] = "TEXT DEFAULT ''",
+                ["BuyerMessage"] = "TEXT DEFAULT ''",
+                ["SellerMemo"] = "TEXT DEFAULT ''",
+                ["ProductInfo"] = "TEXT DEFAULT ''",
+                ["OrderInfoPushTime"] = "TEXT",
+                ["OrderInfoJson"] = "TEXT DEFAULT ''",
                 ["VideoCodec"] = "TEXT DEFAULT ''",
                 ["VideoEncoder"] = "TEXT DEFAULT ''",
                 ["IsDeleted"] = "INTEGER DEFAULT 0",

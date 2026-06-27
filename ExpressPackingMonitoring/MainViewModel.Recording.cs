@@ -426,7 +426,8 @@ namespace ExpressPackingMonitoring.ViewModels
                 }
 
                 // 6. 在数据库中创建记录占位符
-                _currentRecordId = _db?.InsertVideoRecord(_recordingOrderId, _recordingMode, _currentVideoCodec, _currentVideoEncoder, filePath, _recordStartTime) ?? 0;
+                var orderInfoSnapshot = _webServer?.GetOrderInfo(_recordingOrderId);
+                _currentRecordId = _db?.InsertVideoRecord(_recordingOrderId, _recordingMode, _currentVideoCodec, _currentVideoEncoder, filePath, _recordStartTime, orderInfoSnapshot) ?? 0;
                 RuntimeLog.Info("Recording", $"Database record inserted id={_currentRecordId}, file={Path.GetFileName(filePath)}");
 
                 ShowToast("提示：开始录像");

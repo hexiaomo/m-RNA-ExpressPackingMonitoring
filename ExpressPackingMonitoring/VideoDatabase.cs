@@ -2,6 +2,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Text.Json;
 using Microsoft.Data.Sqlite;
 
 namespace ExpressPackingMonitoring
@@ -14,6 +15,13 @@ namespace ExpressPackingMonitoring
         public long Id { get; set; }
         public string OrderId { get; set; } = "";
         public string Mode { get; set; } = "";       // 发货/退货
+        public string TrackingNumber { get; set; } = "";
+        public string SourceOrderId { get; set; } = "";
+        public string BuyerMessage { get; set; } = "";
+        public string SellerMemo { get; set; } = "";
+        public string ProductInfo { get; set; } = "";
+        public DateTime? OrderInfoPushTime { get; set; }
+        public string OrderInfoJson { get; set; } = "";
         public string VideoCodec { get; set; } = "";
         public string VideoEncoder { get; set; } = "";
         public string FilePath { get; set; } = "";
@@ -96,6 +104,13 @@ namespace ExpressPackingMonitoring
                     Id INTEGER PRIMARY KEY AUTOINCREMENT,
                     OrderId TEXT NOT NULL,
                     Mode TEXT NOT NULL DEFAULT '',
+                    TrackingNumber TEXT DEFAULT '',
+                    SourceOrderId TEXT DEFAULT '',
+                    BuyerMessage TEXT DEFAULT '',
+                    SellerMemo TEXT DEFAULT '',
+                    ProductInfo TEXT DEFAULT '',
+                    OrderInfoPushTime TEXT,
+                    OrderInfoJson TEXT DEFAULT '',
                     FilePath TEXT NOT NULL,
                     FileName TEXT NOT NULL,
                     FileSizeBytes INTEGER DEFAULT 0,
@@ -106,6 +121,19 @@ namespace ExpressPackingMonitoring
                     IsDeleted INTEGER DEFAULT 0,
                     DeletedAt TEXT,
                     DeleteReason TEXT DEFAULT ''
+                );");
+
+            ExecuteNonQuery(@"
+                CREATE TABLE IF NOT EXISTS OrderInfoRecords (
+                    TrackingNumber TEXT PRIMARY KEY,
+                    SourceOrderId TEXT DEFAULT '',
+                    BuyerMessage TEXT DEFAULT '',
+                    SellerMemo TEXT DEFAULT '',
+                    ProductInfo TEXT DEFAULT '',
+                    PushTime TEXT,
+                    OrderInfoJson TEXT DEFAULT '',
+                    CreatedAt TEXT NOT NULL,
+                    UpdatedAt TEXT NOT NULL
                 );");
 
             // 删除日志表
@@ -125,31 +153,123 @@ namespace ExpressPackingMonitoring
             ExecuteNonQuery("CREATE INDEX IF NOT EXISTS idx_video_filepath ON VideoRecords(FilePath);");
             ExecuteNonQuery("CREATE INDEX IF NOT EXISTS idx_video_isdeleted ON VideoRecords(IsDeleted);");
             ExecuteNonQuery("CREATE INDEX IF NOT EXISTS idx_video_active_starttime ON VideoRecords(IsDeleted, StartTime DESC);");
+            ExecuteNonQuery("CREATE INDEX IF NOT EXISTS idx_video_tracking ON VideoRecords(TrackingNumber);");
+            ExecuteNonQuery("CREATE INDEX IF NOT EXISTS idx_video_source_order ON VideoRecords(SourceOrderId);");
+            ExecuteNonQuery("CREATE INDEX IF NOT EXISTS idx_orderinfo_source_order ON OrderInfoRecords(SourceOrderId);");
 
             EnsureColumnExists("VideoRecords", "VideoCodec", "TEXT DEFAULT ''");
             EnsureColumnExists("VideoRecords", "VideoEncoder", "TEXT DEFAULT ''");
+            EnsureColumnExists("VideoRecords", "TrackingNumber", "TEXT DEFAULT ''");
+            EnsureColumnExists("VideoRecords", "SourceOrderId", "TEXT DEFAULT ''");
+            EnsureColumnExists("VideoRecords", "BuyerMessage", "TEXT DEFAULT ''");
+            EnsureColumnExists("VideoRecords", "SellerMemo", "TEXT DEFAULT ''");
+            EnsureColumnExists("VideoRecords", "ProductInfo", "TEXT DEFAULT ''");
+            EnsureColumnExists("VideoRecords", "OrderInfoPushTime", "TEXT");
+            EnsureColumnExists("VideoRecords", "OrderInfoJson", "TEXT DEFAULT ''");
         }
 
         /// <summary>
         /// 录制开始时插入记录，返回记录 ID
         /// </summary>
-        public long InsertVideoRecord(string orderId, string mode, string videoCodec, string videoEncoder, string filePath, DateTime startTime)
+        public long InsertVideoRecord(string orderId, string mode, string videoCodec, string videoEncoder, string filePath, DateTime startTime, OrderInfo orderInfo = null)
         {
+            string orderInfoJson = SerializeOrderInfo(orderInfo);
             lock (_lock)
             {
                 using var cmd = _connection.CreateCommand();
                 cmd.CommandText = @"
-                    INSERT INTO VideoRecords (OrderId, Mode, VideoCodec, VideoEncoder, FilePath, FileName, StartTime)
-                    VALUES (@orderId, @mode, @videoCodec, @videoEncoder, @filePath, @fileName, @startTime);
+                    INSERT INTO VideoRecords (
+                        OrderId, Mode, TrackingNumber, SourceOrderId, BuyerMessage, SellerMemo, ProductInfo,
+                        OrderInfoPushTime, OrderInfoJson, VideoCodec, VideoEncoder, FilePath, FileName, StartTime)
+                    VALUES (
+                        @orderId, @mode, @trackingNumber, @sourceOrderId, @buyerMessage, @sellerMemo, @productInfo,
+                        @orderInfoPushTime, @orderInfoJson, @videoCodec, @videoEncoder, @filePath, @fileName, @startTime);
                     SELECT last_insert_rowid();";
                 cmd.Parameters.AddWithValue("@orderId", orderId ?? "");
                 cmd.Parameters.AddWithValue("@mode", mode ?? "");
+                cmd.Parameters.AddWithValue("@trackingNumber", FirstNotEmpty(orderInfo?.TrackingNumber, orderId));
+                cmd.Parameters.AddWithValue("@sourceOrderId", orderInfo?.OrderId ?? "");
+                cmd.Parameters.AddWithValue("@buyerMessage", orderInfo?.BuyerMessage ?? "");
+                cmd.Parameters.AddWithValue("@sellerMemo", orderInfo?.SellerMemo ?? "");
+                cmd.Parameters.AddWithValue("@productInfo", orderInfo?.ProductInfo ?? "");
+                cmd.Parameters.AddWithValue("@orderInfoPushTime", orderInfo == null ? DBNull.Value : orderInfo.PushTime.ToString("yyyy-MM-dd HH:mm:ss"));
+                cmd.Parameters.AddWithValue("@orderInfoJson", orderInfoJson);
                 cmd.Parameters.AddWithValue("@videoCodec", videoCodec ?? "");
                 cmd.Parameters.AddWithValue("@videoEncoder", videoEncoder ?? "");
                 cmd.Parameters.AddWithValue("@filePath", filePath ?? "");
                 cmd.Parameters.AddWithValue("@fileName", Path.GetFileName(filePath ?? ""));
                 cmd.Parameters.AddWithValue("@startTime", startTime.ToString("yyyy-MM-dd HH:mm:ss"));
                 return (long)cmd.ExecuteScalar();
+            }
+        }
+
+        public void UpsertOrderInfos(IEnumerable<OrderInfo> items)
+        {
+            if (items == null) return;
+            lock (_lock)
+            {
+                using var transaction = _connection.BeginTransaction();
+                foreach (var item in items)
+                {
+                    if (string.IsNullOrWhiteSpace(item?.TrackingNumber)) continue;
+                    string now = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
+                    using var cmd = _connection.CreateCommand();
+                    cmd.Transaction = transaction;
+                    cmd.CommandText = @"
+                        INSERT INTO OrderInfoRecords (
+                            TrackingNumber, SourceOrderId, BuyerMessage, SellerMemo, ProductInfo,
+                            PushTime, OrderInfoJson, CreatedAt, UpdatedAt)
+                        VALUES (
+                            @trackingNumber, @sourceOrderId, @buyerMessage, @sellerMemo, @productInfo,
+                            @pushTime, @orderInfoJson, @now, @now)
+                        ON CONFLICT(TrackingNumber) DO UPDATE SET
+                            SourceOrderId = excluded.SourceOrderId,
+                            BuyerMessage = excluded.BuyerMessage,
+                            SellerMemo = excluded.SellerMemo,
+                            ProductInfo = excluded.ProductInfo,
+                            PushTime = excluded.PushTime,
+                            OrderInfoJson = excluded.OrderInfoJson,
+                            UpdatedAt = excluded.UpdatedAt;";
+                    AddOrderInfoParameters(cmd, item);
+                    cmd.Parameters.AddWithValue("@now", now);
+                    cmd.ExecuteNonQuery();
+                }
+                transaction.Commit();
+            }
+        }
+
+        public void UpdateRecentVideoOrderInfos(IEnumerable<OrderInfo> items)
+        {
+            if (items == null) return;
+            lock (_lock)
+            {
+                using var transaction = _connection.BeginTransaction();
+                foreach (var item in items)
+                {
+                    if (string.IsNullOrWhiteSpace(item?.TrackingNumber)) continue;
+                    using var cmd = _connection.CreateCommand();
+                    cmd.Transaction = transaction;
+                    cmd.CommandText = @"
+                        UPDATE VideoRecords SET
+                            TrackingNumber = @trackingNumber,
+                            SourceOrderId = @sourceOrderId,
+                            BuyerMessage = @buyerMessage,
+                            SellerMemo = @sellerMemo,
+                            ProductInfo = @productInfo,
+                            OrderInfoPushTime = @pushTime,
+                            OrderInfoJson = @orderInfoJson
+                        WHERE IsDeleted = 0
+                          AND StartTime >= @since
+                          AND (OrderId = @trackingNumber OR TrackingNumber = @trackingNumber)
+                          AND (
+                              BuyerMessage = '' OR SellerMemo = '' OR ProductInfo = ''
+                              OR SourceOrderId = '' OR OrderInfoJson = ''
+                          );";
+                    AddOrderInfoParameters(cmd, item);
+                    cmd.Parameters.AddWithValue("@since", DateTime.Now.AddHours(-72).ToString("yyyy-MM-dd HH:mm:ss"));
+                    cmd.ExecuteNonQuery();
+                }
+                transaction.Commit();
             }
         }
 
@@ -334,7 +454,8 @@ namespace ExpressPackingMonitoring
                 cmd.CommandText = @"
                     SELECT Id, OrderId, Mode, VideoCodec, VideoEncoder, FilePath, FileName, FileSizeBytes, 
                            StartTime, EndTime, DurationSeconds, StopReason,
-                           IsDeleted, DeletedAt, DeleteReason
+                           IsDeleted, DeletedAt, DeleteReason,
+                           TrackingNumber, SourceOrderId, BuyerMessage, SellerMemo, ProductInfo, OrderInfoPushTime, OrderInfoJson
                     FROM VideoRecords WHERE Id = @id AND IsDeleted = 0;";
                 cmd.Parameters.AddWithValue("@id", id);
                 using var reader = cmd.ExecuteReader();
@@ -356,7 +477,14 @@ namespace ExpressPackingMonitoring
                         StopReason = reader.IsDBNull(11) ? "" : reader.GetString(11),
                         IsDeleted = reader.GetInt64(12) == 1,
                         DeletedAt = reader.IsDBNull(13) ? null : DateTime.Parse(reader.GetString(13)),
-                        DeleteReason = reader.IsDBNull(14) ? "" : reader.GetString(14)
+                        DeleteReason = reader.IsDBNull(14) ? "" : reader.GetString(14),
+                        TrackingNumber = reader.IsDBNull(15) ? "" : reader.GetString(15),
+                        SourceOrderId = reader.IsDBNull(16) ? "" : reader.GetString(16),
+                        BuyerMessage = reader.IsDBNull(17) ? "" : reader.GetString(17),
+                        SellerMemo = reader.IsDBNull(18) ? "" : reader.GetString(18),
+                        ProductInfo = reader.IsDBNull(19) ? "" : reader.GetString(19),
+                        OrderInfoPushTime = reader.IsDBNull(20) ? null : DateTime.Parse(reader.GetString(20)),
+                        OrderInfoJson = reader.IsDBNull(21) ? "" : reader.GetString(21)
                     };
                 }
                 return null;
@@ -376,7 +504,8 @@ namespace ExpressPackingMonitoring
                 string sql = @"
                       SELECT Id, OrderId, Mode, VideoCodec, VideoEncoder, FilePath, FileName, FileSizeBytes, 
                           StartTime, EndTime, DurationSeconds, StopReason,
-                           IsDeleted, DeletedAt, DeleteReason
+                           IsDeleted, DeletedAt, DeleteReason,
+                           TrackingNumber, SourceOrderId, BuyerMessage, SellerMemo, ProductInfo, OrderInfoPushTime, OrderInfoJson
                     FROM VideoRecords 
                     WHERE 1 = 1";
 
@@ -388,7 +517,10 @@ namespace ExpressPackingMonitoring
 
                 if (!string.IsNullOrWhiteSpace(keyword))
                 {
-                    sql += " AND (OrderId LIKE @keyword OR FileName LIKE @keyword)";
+                    sql += @" AND (
+                        OrderId LIKE @keyword OR FileName LIKE @keyword OR TrackingNumber LIKE @keyword
+                        OR SourceOrderId LIKE @keyword OR BuyerMessage LIKE @keyword
+                        OR SellerMemo LIKE @keyword OR ProductInfo LIKE @keyword)";
                     cmd.Parameters.AddWithValue("@keyword", $"%{keyword}%");
                 }
 
@@ -418,7 +550,14 @@ namespace ExpressPackingMonitoring
                         StopReason = reader.IsDBNull(11) ? "" : reader.GetString(11),
                         IsDeleted = reader.GetInt64(12) == 1,
                         DeletedAt = reader.IsDBNull(13) ? null : DateTime.Parse(reader.GetString(13)),
-                        DeleteReason = reader.IsDBNull(14) ? "" : reader.GetString(14)
+                        DeleteReason = reader.IsDBNull(14) ? "" : reader.GetString(14),
+                        TrackingNumber = reader.IsDBNull(15) ? "" : reader.GetString(15),
+                        SourceOrderId = reader.IsDBNull(16) ? "" : reader.GetString(16),
+                        BuyerMessage = reader.IsDBNull(17) ? "" : reader.GetString(17),
+                        SellerMemo = reader.IsDBNull(18) ? "" : reader.GetString(18),
+                        ProductInfo = reader.IsDBNull(19) ? "" : reader.GetString(19),
+                        OrderInfoPushTime = reader.IsDBNull(20) ? null : DateTime.Parse(reader.GetString(20)),
+                        OrderInfoJson = reader.IsDBNull(21) ? "" : reader.GetString(21)
                     });
                 }
                 return results;
@@ -443,7 +582,14 @@ namespace ExpressPackingMonitoring
                 StopReason = reader.IsDBNull(11) ? "" : reader.GetString(11),
                 IsDeleted = reader.GetInt64(12) == 1,
                 DeletedAt = reader.IsDBNull(13) ? null : DateTime.Parse(reader.GetString(13)),
-                DeleteReason = reader.IsDBNull(14) ? "" : reader.GetString(14)
+                DeleteReason = reader.IsDBNull(14) ? "" : reader.GetString(14),
+                TrackingNumber = reader.IsDBNull(15) ? "" : reader.GetString(15),
+                SourceOrderId = reader.IsDBNull(16) ? "" : reader.GetString(16),
+                BuyerMessage = reader.IsDBNull(17) ? "" : reader.GetString(17),
+                SellerMemo = reader.IsDBNull(18) ? "" : reader.GetString(18),
+                ProductInfo = reader.IsDBNull(19) ? "" : reader.GetString(19),
+                OrderInfoPushTime = reader.IsDBNull(20) ? null : DateTime.Parse(reader.GetString(20)),
+                OrderInfoJson = reader.IsDBNull(21) ? "" : reader.GetString(21)
             };
         }
 
@@ -471,7 +617,10 @@ namespace ExpressPackingMonitoring
 
                 if (!string.IsNullOrWhiteSpace(keyword))
                 {
-                    whereSql += " AND (OrderId LIKE @keyword OR FileName LIKE @keyword)";
+                    whereSql += @" AND (
+                        OrderId LIKE @keyword OR FileName LIKE @keyword OR TrackingNumber LIKE @keyword
+                        OR SourceOrderId LIKE @keyword OR BuyerMessage LIKE @keyword
+                        OR SellerMemo LIKE @keyword OR ProductInfo LIKE @keyword)";
                     countCmd.Parameters.AddWithValue("@keyword", $"%{keyword}%");
                 }
 
@@ -486,7 +635,8 @@ namespace ExpressPackingMonitoring
                 cmd.CommandText = @"
                     SELECT Id, OrderId, Mode, VideoCodec, VideoEncoder, FilePath, FileName, FileSizeBytes,
                            StartTime, EndTime, DurationSeconds, StopReason,
-                           IsDeleted, DeletedAt, DeleteReason "
+                           IsDeleted, DeletedAt, DeleteReason,
+                           TrackingNumber, SourceOrderId, BuyerMessage, SellerMemo, ProductInfo, OrderInfoPushTime, OrderInfoJson "
                     + whereSql + @"
                     ORDER BY StartTime DESC
                     LIMIT @limit OFFSET @offset;";
@@ -720,6 +870,43 @@ namespace ExpressPackingMonitoring
             }
         }
 
+
+        private static void AddOrderInfoParameters(SqliteCommand cmd, OrderInfo item)
+        {
+            cmd.Parameters.AddWithValue("@trackingNumber", item.TrackingNumber?.Trim().ToUpperInvariant() ?? "");
+            cmd.Parameters.AddWithValue("@sourceOrderId", item.OrderId ?? "");
+            cmd.Parameters.AddWithValue("@buyerMessage", item.BuyerMessage ?? "");
+            cmd.Parameters.AddWithValue("@sellerMemo", item.SellerMemo ?? "");
+            cmd.Parameters.AddWithValue("@productInfo", item.ProductInfo ?? "");
+            cmd.Parameters.AddWithValue("@pushTime", item.PushTime.ToString("yyyy-MM-dd HH:mm:ss"));
+            cmd.Parameters.AddWithValue("@orderInfoJson", SerializeOrderInfo(item));
+        }
+
+        private static string SerializeOrderInfo(OrderInfo item)
+        {
+            if (item == null) return "";
+            try
+            {
+                return JsonSerializer.Serialize(item, new JsonSerializerOptions
+                {
+                    Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+                });
+            }
+            catch
+            {
+                return "";
+            }
+        }
+
+        private static string FirstNotEmpty(params string[] values)
+        {
+            foreach (string value in values)
+            {
+                if (!string.IsNullOrWhiteSpace(value))
+                    return value.Trim();
+            }
+            return "";
+        }
 
 
         private void ExecuteNonQuery(string sql)
