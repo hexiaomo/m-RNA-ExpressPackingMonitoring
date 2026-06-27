@@ -92,7 +92,14 @@ namespace ExpressPackingMonitoring.ViewModels
         private readonly Mat _motionThreshold = new Mat();
         private BitmapSource _videoFrame;
         private static readonly TimeSpan PreviewFrameInterval = TimeSpan.FromMilliseconds(1000.0 / 12.0);
+        private static readonly TimeSpan PreviewFreezeWarnThreshold = TimeSpan.FromSeconds(3);
+        private static readonly TimeSpan PreviewFreezeRestartThreshold = TimeSpan.FromSeconds(5);
+        private static readonly TimeSpan PreviewFreezeRestartCooldown = TimeSpan.FromSeconds(30);
         private DateTime _lastPreviewFrameAt = DateTime.MinValue;
+        private DateTime _lastPreviewPublishedAt = DateTime.MinValue;
+        private DateTime _lastPreviewFreezeLogAt = DateTime.MinValue;
+        private DateTime _lastPreviewWatchdogRestartAt = DateTime.MinValue;
+        private DateTime _lastRecordingQueueWarnAt = DateTime.MinValue;
         private int _previewUpdatePending;
         private CancellationTokenSource _cts;
 
@@ -912,6 +919,7 @@ namespace ExpressPackingMonitoring.ViewModels
         {
             _cts = new CancellationTokenSource();
             _lastActivityTime = DateTime.Now;
+            RuntimeLog.Info("System", "InitializeSystem");
             StartCamera();
             _videoTask = Task.Run(() => VideoProcessLoop(_cts.Token), _cts.Token);
             Task.Run(CheckDiskAndCleanup);
@@ -986,9 +994,16 @@ namespace ExpressPackingMonitoring.ViewModels
             _isRestartingCamera = true;
             try
             {
+                RuntimeLog.Warn("Camera", $"RestartCamera start recording={IsRecording}, failures={_consecutiveRestartFailures}");
                 StopCamera();
                 StartCamera();
                 _lastRestartAttempt = DateTime.Now;
+                RuntimeLog.Info("Camera", $"RestartCamera done running={_videoSource?.IsRunning == true}");
+            }
+            catch (Exception ex)
+            {
+                RuntimeLog.Error("Camera", "RestartCamera failed", ex);
+                throw;
             }
             finally
             {
@@ -1002,6 +1017,7 @@ namespace ExpressPackingMonitoring.ViewModels
             _isRestartingCamera = true;
             try
             {
+                RuntimeLog.Warn("Camera", $"RestartCameraWithRecordingStop start recording={IsRecording}, failures={_consecutiveRestartFailures}");
                 if (IsRecording)
                 {
                     // 录制中：先尝试不停止录制的重连
@@ -1012,6 +1028,7 @@ namespace ExpressPackingMonitoring.ViewModels
                     if (_videoSource != null && _videoSource.IsRunning)
                     {
                         _consecutiveRestartFailures = 0;
+                        RuntimeLog.Info("Camera", "Camera reconnected while recording, recording continues");
                         ShowToast("成功：摄像头已重连，录制继续");
                         Speak("摄像头已连接");
                     }
@@ -1022,6 +1039,7 @@ namespace ExpressPackingMonitoring.ViewModels
                         {
                             // 多次重连失败，停止录制
                             _stopReason = "摄像头断连";
+                            RuntimeLog.Warn("Camera", $"Camera reconnect failed {_consecutiveRestartFailures} times while recording, stopping recording");
                             await SafeStopRecordingAsync();
                             ShowToast($"警告：摄像头连续 {MaxConsecutiveRestartFailures} 次重连失败，录制已停止。请重新插拔后在设置中手动重启。");
                             SpeakWarning("请重新连接摄像头", 3);
@@ -1043,10 +1061,12 @@ namespace ExpressPackingMonitoring.ViewModels
                     if (_videoSource != null && _videoSource.IsRunning)
                     {
                         _consecutiveRestartFailures = 0;
+                        RuntimeLog.Info("Camera", "Camera reconnected while idle");
                     }
                     else
                     {
                         _consecutiveRestartFailures++;
+                        RuntimeLog.Warn("Camera", $"Camera reconnect failed while idle, failures={_consecutiveRestartFailures}");
                         if (_consecutiveRestartFailures >= MaxConsecutiveRestartFailures)
                         {
                             ShowToast($"警告：摄像头连续 {MaxConsecutiveRestartFailures} 次重连失败，已停止自动重连。请重新插拔后在设置中手动重启。");
@@ -1127,6 +1147,7 @@ namespace ExpressPackingMonitoring.ViewModels
                 var videoDevices = new FilterInfoCollection(FilterCategory.VideoInputDevice);
                 if (videoDevices.Count == 0) 
                 { 
+                    RuntimeLog.Warn("Camera", "StartCamera found no video devices");
                     ShowToast("警告：未检测到任何摄像头");
                     SpeakWarning("未检测到摄像头");
                     return; 
@@ -1151,6 +1172,7 @@ namespace ExpressPackingMonitoring.ViewModels
                     if (targetIndex == -1)
                     {
                         Debug.WriteLine($"[Camera] 目标摄像头未找到: {targetMoniker}，不切换到其他设备");
+                        RuntimeLog.Warn("Camera", $"Configured camera missing, moniker={targetMoniker}");
                         ShowToast("警告：目标摄像头未连接，等待重新插入");
                         return;
                     }
@@ -1172,6 +1194,7 @@ namespace ExpressPackingMonitoring.ViewModels
                 }
 
                 _videoSource = new VideoCaptureDevice(videoDevices[targetIndex].MonikerString);
+                RuntimeLog.Info("Camera", $"StartCamera selected index={targetIndex}, name={videoDevices[targetIndex].Name}");
                 
                 // 加载该摄像头的独立配置
                 if (Config.CameraConfigs.TryGetValue(videoDevices[targetIndex].MonikerString, out var settings))
@@ -1186,6 +1209,7 @@ namespace ExpressPackingMonitoring.ViewModels
                 // 设置错误处理器（摄像头拔掉时 AForge 会触发此事件）
                 _videoSource.VideoSourceError += (s, e) => {
                     Debug.WriteLine($"[Camera] 视频源错误: {e.Description}");
+                    RuntimeLog.Error("Camera", $"VideoSourceError: {e.Description}");
                     _ = Application.Current.Dispatcher.InvokeAsync(() => {
                         ShowToast("警告：摄像头连接发生错误，尝试重连...");
                         RestartCameraWithRecordingStop();
@@ -1219,15 +1243,22 @@ namespace ExpressPackingMonitoring.ViewModels
                 }
                 _videoSource.NewFrame += VideoSource_NewFrame; _videoSource.Start();
                 _lastFrameTime = DateTime.Now; // 防止 VideoProcessLoop 启动时误判无帧
+                _lastPreviewPublishedAt = DateTime.Now;
                 _cameraEverConnected = true;
+                RuntimeLog.Info("Camera", $"StartCamera success {Config.FrameWidth}x{Config.FrameHeight}@{_actualCameraFps}, running={_videoSource.IsRunning}");
             }
-            catch { ShowToast("摄像头启动失败"); }
+            catch (Exception ex)
+            {
+                RuntimeLog.Error("Camera", "StartCamera failed", ex);
+                ShowToast("摄像头启动失败");
+            }
         }
 
         private void StopCamera()
         {
             if (_videoSource != null)
             {
+                RuntimeLog.Info("Camera", $"StopCamera running={_videoSource.IsRunning}");
                 try { _videoSource.NewFrame -= VideoSource_NewFrame; } catch { }
                 try
                 {
@@ -1243,9 +1274,10 @@ namespace ExpressPackingMonitoring.ViewModels
                 _videoSource = null;
             }
             lock (_frameLock) { _latestFrame?.Dispose(); _latestFrame = null; }
+            RuntimeLog.Info("Camera", "StopCamera completed");
         }
         
-        private void VideoSource_NewFrame(object sender, NewFrameEventArgs eventArgs) { try { Mat newMat = BitmapToMat(eventArgs.Frame); lock (_frameLock) { _latestFrame?.Dispose(); _latestFrame = newMat; } _lastFrameTime = DateTime.Now; } catch { } }
+        private void VideoSource_NewFrame(object sender, NewFrameEventArgs eventArgs) { try { Mat newMat = BitmapToMat(eventArgs.Frame); lock (_frameLock) { _latestFrame?.Dispose(); _latestFrame = newMat; } _lastFrameTime = DateTime.Now; } catch (Exception ex) { RuntimeLog.Error("Camera", "NewFrame conversion failed", ex); } }
 
         private Mat BitmapToMat(Bitmap bitmap)
         {
@@ -1466,6 +1498,8 @@ namespace ExpressPackingMonitoring.ViewModels
                         {
                             currentFrame.Dispose();
                         }
+
+                        CheckPreviewWatchdog();
                     }
                     else
                     {
@@ -1599,6 +1633,58 @@ namespace ExpressPackingMonitoring.ViewModels
                 }
             }
             catch (OperationCanceledException) { }
+            catch (Exception ex)
+            {
+                RuntimeLog.Error("VideoProcess", "VideoProcessLoop crashed", ex);
+                throw;
+            }
+        }
+
+        private void CheckPreviewWatchdog()
+        {
+            if (_isDisposed || _isCameraSleeping || SuppressVideoPreviewUpdates) return;
+            if (_videoSource == null || !_videoSource.IsRunning || !_cameraEverConnected) return;
+            if (_lastFrameTime == DateTime.MinValue || _lastPreviewPublishedAt == DateTime.MinValue) return;
+
+            DateTime now = DateTime.Now;
+            TimeSpan sinceLastFrame = now - _lastFrameTime;
+            TimeSpan sinceLastPreview = now - _lastPreviewPublishedAt;
+
+            if (sinceLastFrame > PreviewFreezeWarnThreshold)
+            {
+                if (now - _lastPreviewFreezeLogAt > PreviewFreezeWarnThreshold)
+                {
+                    _lastPreviewFreezeLogAt = now;
+                    RuntimeLog.Warn("Preview", $"No new camera frame for {sinceLastFrame.TotalSeconds:F1}s, preview age={sinceLastPreview.TotalSeconds:F1}s, recording={IsRecording}");
+                }
+                return;
+            }
+
+            if (sinceLastPreview < PreviewFreezeWarnThreshold) return;
+
+            int queueCount = -1;
+            try { queueCount = _videoWriteQueue?.Count ?? -1; } catch { }
+            string writeTaskStatus = _writeTask == null ? "null" : _writeTask.Status.ToString();
+
+            if (now - _lastPreviewFreezeLogAt > PreviewFreezeWarnThreshold)
+            {
+                _lastPreviewFreezeLogAt = now;
+                RuntimeLog.Warn("Preview", $"Preview stale for {sinceLastPreview.TotalSeconds:F1}s while frames are fresh ({sinceLastFrame.TotalSeconds:F1}s), pending={_previewUpdatePending}, recording={IsRecording}, queue={queueCount}, writeTask={writeTaskStatus}");
+            }
+
+            if (sinceLastPreview < PreviewFreezeRestartThreshold) return;
+            if (_isRestartingCamera) return;
+            if (now - _lastPreviewWatchdogRestartAt < PreviewFreezeRestartCooldown) return;
+
+            _lastPreviewWatchdogRestartAt = now;
+            RuntimeLog.Warn("Preview", $"Preview frozen for {sinceLastPreview.TotalSeconds:F1}s, restarting camera. recording={IsRecording}, queue={queueCount}, writeTask={writeTaskStatus}");
+            Interlocked.Exchange(ref _previewUpdatePending, 0);
+            _ = Application.Current.Dispatcher.InvokeAsync(() =>
+            {
+                if (_isDisposed || _isCameraSleeping || SuppressVideoPreviewUpdates) return;
+                ShowToast("警告：预览画面卡住，正在重连摄像头...");
+                RestartCameraWithRecordingStop();
+            });
         }
 
         private static double SmoothStep(double t)
@@ -1636,6 +1722,7 @@ namespace ExpressPackingMonitoring.ViewModels
                         if (!_isDisposed && !SuppressVideoPreviewUpdates)
                         {
                             VideoFrame = bitmap;
+                            _lastPreviewPublishedAt = DateTime.Now;
                         }
                     }
                     finally
@@ -1673,10 +1760,17 @@ namespace ExpressPackingMonitoring.ViewModels
                 if (_writeTask != null && _writeTask.IsCompleted) return false;
 
                 var queue = _videoWriteQueue;
-                return queue != null && !queue.IsAddingCompleted && queue.TryAdd(frame, 5);
+                bool added = queue != null && !queue.IsAddingCompleted && queue.TryAdd(frame, 5);
+                if (!added && DateTime.Now - _lastRecordingQueueWarnAt > TimeSpan.FromSeconds(5))
+                {
+                    _lastRecordingQueueWarnAt = DateTime.Now;
+                    RuntimeLog.Warn("Recording", $"Video frame enqueue failed, queueNull={queue == null}, addingCompleted={queue?.IsAddingCompleted}, queueCount={queue?.Count}, writeTask={_writeTask?.Status}");
+                }
+                return added;
             }
-            catch
+            catch (Exception ex)
             {
+                RuntimeLog.Error("Recording", "Video frame enqueue exception", ex);
                 return false;
             }
         }

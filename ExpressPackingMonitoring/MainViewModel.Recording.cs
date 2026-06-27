@@ -98,6 +98,7 @@ namespace ExpressPackingMonitoring.ViewModels
             var scanRecord = _currentScanRecord;
             var recordId = _currentRecordId; 
             var audioLogPath = _currentAudioLogPath;
+            RuntimeLog.Info("Recording", $"Stop requested id={recordId}, reason={stopReason}, file={Path.GetFileName(filePath ?? "")}");
 
             _recordStartTime = DateTime.MinValue;
             _currentScanRecord = null;
@@ -342,6 +343,7 @@ namespace ExpressPackingMonitoring.ViewModels
                 string filePath = Path.Combine(dateFolder, fileName);
                 string audioFilePath = Path.ChangeExtension(filePath, ".wav");
                 string audioLogPath = Path.ChangeExtension(filePath, ".audio.log");
+                RuntimeLog.Info("Recording", $"Start requested order={CurrentOrderId}, mode={CurrentMode}, file={fileName}, codec={Config.VideoCodec}");
                 _currentAudioLogPath = audioLogPath;
                 _audioFailedForCurrentRecording = false;
                 _currentVideoFilePath = filePath;
@@ -389,6 +391,7 @@ namespace ExpressPackingMonitoring.ViewModels
                     Debug.WriteLine($"[RecordingStartup] first frame not confirmed within 200 ms (total {startupWatch.ElapsedMilliseconds} ms)");
                 if (_writeTask.IsCompleted) 
                 {
+                    RuntimeLog.Warn("Recording", $"Recording writer completed during startup, file={Path.GetFileName(filePath)}");
                     DeleteAudioTempFile(StopAudioRecording());
                     ClearCurrentAudioLogPath(audioLogPath);
                     IsRecording = false;
@@ -424,6 +427,7 @@ namespace ExpressPackingMonitoring.ViewModels
 
                 // 6. 在数据库中创建记录占位符
                 _currentRecordId = _db?.InsertVideoRecord(_recordingOrderId, _recordingMode, _currentVideoCodec, _currentVideoEncoder, filePath, _recordStartTime) ?? 0;
+                RuntimeLog.Info("Recording", $"Database record inserted id={_currentRecordId}, file={Path.GetFileName(filePath)}");
 
                 ShowToast("提示：开始录像");
                 Speak("开始录制", cancelPrevious: false);
@@ -453,6 +457,7 @@ namespace ExpressPackingMonitoring.ViewModels
                 string fallbackEncoder = GetCpuEncoder();
                 if (!string.Equals(encoder, fallbackEncoder, StringComparison.OrdinalIgnoreCase))
                 {
+                    RuntimeLog.Warn("FFmpeg", $"Encoder failed, retrying CPU. requested={encoder}, fallback={fallbackEncoder}, error={err}");
                     WriteAudioDiagnostic($"视频编码器启动失败，改用 CPU 软编码重试: requested={encoder}, fallback={fallbackEncoder}, error={err}");
                     try { if (File.Exists(filePath) && new FileInfo(filePath).Length == 0) File.Delete(filePath); } catch { }
 
@@ -465,6 +470,7 @@ namespace ExpressPackingMonitoring.ViewModels
             {
                 _currentVideoEncoder = encoder;
                 _currentVideoCodec = EncodingHelper.GetCodecFromEncoder(encoder);
+                RuntimeLog.Info("FFmpeg", $"Recording pipeline completed ok, encoder={encoder}, file={Path.GetFileName(filePath)}");
                 _ = Application.Current.Dispatcher.BeginInvoke(() =>
                     ShowToast($"编码器 {EncodingHelper.GetEncoderLabel(encoder)}"));
                 return;
@@ -479,8 +485,11 @@ namespace ExpressPackingMonitoring.ViewModels
                     ? err
                     : $"{firstError}\nCPU 软编码重试: {err}";
 
+                RuntimeLog.Error("FFmpeg", $"Recording failed. requested={requestedEncoder}, final={encoder}, file={Path.GetFileName(filePath)}, error={errorDetail}");
+
                 _ = Application.Current.Dispatcher.BeginInvoke(() =>
                 {
+                    MarkCurrentRecordingFailed("编码失败", errorDetail, filePath, EncodingHelper.GetCodecFromEncoder(encoder), encoder);
                     IsRecording = false;
                     IsBusy = false; // 释放 Busy 状态
                     CurrentOrderId = "";
@@ -503,6 +512,29 @@ namespace ExpressPackingMonitoring.ViewModels
                         $"当前设置的编码器无法完成录制，视频未保存。\n\n请求编码器: {EncodingHelper.GetEncoderLabel(requestedEncoder)}\n错误详情: {errorDetail}\n\n已自动尝试 CPU 软编码；若仍失败，请检查摄像头画面和存储路径。",
                         "录制失败", MessageBoxButton.OK, MessageBoxImage.Warning);
                 });
+            }
+        }
+
+        private void MarkCurrentRecordingFailed(string stopReason, string errorDetail, string filePath, string videoCodec, string videoEncoder)
+        {
+            try
+            {
+                long recordId = _currentRecordId;
+                if (recordId <= 0) return;
+
+                long fileSize = 0;
+                try { fileSize = File.Exists(filePath) ? new FileInfo(filePath).Length : 0; } catch { }
+
+                double duration = _recordStartTime == DateTime.MinValue
+                    ? 0
+                    : Math.Max(0, (DateTime.Now - _recordStartTime).TotalSeconds);
+
+                _db?.UpdateVideoRecordOnStop(recordId, DateTime.Now, duration, fileSize, stopReason, videoCodec, videoEncoder);
+                RuntimeLog.Warn("Recording", $"Marked record failed id={recordId}, reason={stopReason}, size={fileSize}, duration={duration:F1}, error={errorDetail}");
+            }
+            catch (Exception ex)
+            {
+                RuntimeLog.Error("Recording", "Failed to mark recording failure in database", ex);
             }
         }
 
@@ -550,6 +582,7 @@ namespace ExpressPackingMonitoring.ViewModels
             {
                 string args = BuildFFmpegArgs(w, h, fps, filePath, encoder, withAudio, GetVideoCqp());
                 Debug.WriteLine($"[FFmpeg] encoder={encoder} audio={withAudio} args={args}");
+                RuntimeLog.Info("FFmpeg", $"Start encoder={encoder}, audio={withAudio}, size={w}x{h}, fps={fps}, file={Path.GetFileName(filePath)}");
 
                 var psi = new ProcessStartInfo
                 {
@@ -562,6 +595,7 @@ namespace ExpressPackingMonitoring.ViewModels
                 };
 
                 ffmpeg = Process.Start(psi);
+                if (ffmpeg == null) RuntimeLog.Error("FFmpeg", "Process.Start returned null");
                 if (ffmpeg == null) return (false, "FFmpeg 进程启动失败");
 
                 // 将进程保存为全局变量，允许从外部强制 Kill
@@ -576,6 +610,7 @@ namespace ExpressPackingMonitoring.ViewModels
                     stderrText = stderrTask.GetAwaiter().GetResult();
                     Debug.WriteLine($"[FFmpeg] early exit ({encoder}): {stderrText}");
                     string shortErr = ExtractFFmpegError(stderrText);
+                    RuntimeLog.Error("FFmpeg", $"Early exit encoder={encoder}, error={shortErr}, stderr={TrimForRuntimeLog(stderrText)}");
                     return (false, shortErr);
                 }
 
@@ -638,6 +673,7 @@ namespace ExpressPackingMonitoring.ViewModels
                     catch (Exception ex) 
                     { 
                         Debug.WriteLine($"[FFmpeg] 管道写入异常: {ex.Message}");
+                        RuntimeLog.Error("FFmpeg", $"Pipe write exception encoder={encoder}", ex);
                         pipeError = true; 
                     }
                     finally
@@ -670,22 +706,33 @@ namespace ExpressPackingMonitoring.ViewModels
                 {
                     if (!string.IsNullOrWhiteSpace(stderrText))
                         Debug.WriteLine($"[FFmpeg] stderr (success): {stderrText[..Math.Min(stderrText.Length, 500)]}");
+                    RuntimeLog.Info("FFmpeg", $"Exit ok encoder={encoder}, fileSize={new FileInfo(filePath).Length}, anyFrameWritten={anyFrameWritten}");
                     return (true, "");
                 }
 
                 string finalErr = ExtractFFmpegError(stderrText);
                 if (string.IsNullOrWhiteSpace(finalErr))
                     finalErr = !fileOk ? "FFmpeg 未生成有效视频文件" : $"FFmpeg 退出码: {ffmpeg?.ExitCode}";
+                RuntimeLog.Error("FFmpeg", $"Exit failed encoder={encoder}, processOk={processOk}, fileOk={fileOk}, anyFrameWritten={anyFrameWritten}, error={finalErr}, stderr={TrimForRuntimeLog(stderrText)}");
                 return (false, finalErr);
             }
-            catch (OperationCanceledException) { return (anyFrameWritten, ""); }
+            catch (OperationCanceledException)
+            {
+                RuntimeLog.Info("FFmpeg", $"Canceled encoder={encoder}, anyFrameWritten={anyFrameWritten}");
+                return (anyFrameWritten, "");
+            }
             catch (IOException ex)
             {
+                RuntimeLog.Error("FFmpeg", $"IOException encoder={encoder}, canceled={token.IsCancellationRequested}, anyFrameWritten={anyFrameWritten}", ex);
                 return token.IsCancellationRequested && anyFrameWritten
                     ? (true, "")
                     : (false, ex.Message);
             }
-            catch (Exception ex) { return (false, ex.Message); }
+            catch (Exception ex)
+            {
+                RuntimeLog.Error("FFmpeg", $"Exception encoder={encoder}", ex);
+                return (false, ex.Message);
+            }
             finally
             {
                 if (!stdinClosed) { try { stdin?.Close(); } catch { } }
@@ -722,6 +769,13 @@ namespace ExpressPackingMonitoring.ViewModels
                     return line.Length > 80 ? line[..80] : line;
             }
             return "";
+        }
+
+        private static string TrimForRuntimeLog(string text)
+        {
+            if (string.IsNullOrWhiteSpace(text)) return "";
+            text = text.Replace("\r", " ").Replace("\n", " ").Trim();
+            return text.Length <= 500 ? text : text[..500];
         }
 
         internal static string BuildFFmpegArgs(int w, int h, int fps, string filePath, string encoder, bool withAudio, int videoCqp)

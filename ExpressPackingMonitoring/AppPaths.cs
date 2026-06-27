@@ -21,6 +21,7 @@ namespace ExpressPackingMonitoring
         public static readonly string VideoDatabasePath = Path.Combine(UserDataDir, "videos.db");
         public static readonly string WebDebugLogPath = Path.Combine(LogDir, "web_debug.log");
         public static readonly string EncoderDetectLogPath = Path.Combine(LogDir, "encoder_detect.log");
+        public static readonly string RuntimeLogPath = Path.Combine(LogDir, "runtime.log");
         public static readonly string OrderInfoCachePath = Path.Combine(CacheDir, "orderinfo_cache.json");
 
         static AppPaths()
