@@ -14,6 +14,7 @@ namespace ExpressPackingMonitoring
             base.OnStartup(e);
             RegisterRuntimeExceptionLogging();
             RuntimeLog.Info("App", "Application startup");
+            RuntimeLog.LogBuildInfo();
 
             if (AudioProbe.TryHandleCommandLine(e.Args, out int exitCode))
             {

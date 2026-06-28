@@ -22,7 +22,15 @@
     <!-- 只保留中文资源，去掉其他语言的卫星程序集 -->
     <SatelliteResourceLanguages>zh-Hans</SatelliteResourceLanguages> 
     <ApplicationIcon>app.ico</ApplicationIcon>
+    <GitCommitId Condition="'$(GitCommitId)' == ''">$(SourceRevisionId)</GitCommitId>
   </PropertyGroup>
+
+  <ItemGroup Condition="'$(GitCommitId)' != ''">
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>GitCommitId</_Parameter1>
+      <_Parameter2>$(GitCommitId)</_Parameter2>
+    </AssemblyAttribute>
+  </ItemGroup>
 
   <!-- 修复自包含发布时 ComboBox 因缺少 Accessibility.dll 报错的问题 -->
   <ItemGroup>

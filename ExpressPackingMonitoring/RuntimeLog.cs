@@ -1,6 +1,8 @@
 using System;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
+using System.Reflection;
 using System.Text;
 
 namespace ExpressPackingMonitoring
@@ -15,6 +17,28 @@ namespace ExpressPackingMonitoring
         public static void Warn(string category, string message) => Write("WARN", category, message, null);
 
         public static void Error(string category, string message, Exception? exception = null) => Write("ERROR", category, message, exception);
+
+        public static void LogBuildInfo()
+        {
+            var assembly = Assembly.GetExecutingAssembly();
+            string version = assembly.GetName().Version?.ToString() ?? "unknown";
+            string informationalVersion = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? version;
+            string fileVersion = assembly.GetCustomAttribute<AssemblyFileVersionAttribute>()?.Version ?? version;
+            string gitCommitId = assembly.GetCustomAttributes<AssemblyMetadataAttribute>()
+                .FirstOrDefault(x => string.Equals(x.Key, "GitCommitId", StringComparison.OrdinalIgnoreCase))
+                ?.Value ?? GetCommitIdFromInformationalVersion(informationalVersion);
+
+            Info("App", $"Build info version={version}, fileVersion={fileVersion}, informationalVersion={informationalVersion}, gitCommitId={(string.IsNullOrWhiteSpace(gitCommitId) ? "unknown" : gitCommitId)}");
+        }
+
+        private static string GetCommitIdFromInformationalVersion(string informationalVersion)
+        {
+            int suffixIndex = informationalVersion.LastIndexOf('+');
+            if (suffixIndex < 0 || suffixIndex >= informationalVersion.Length - 1)
+                return "";
+
+            return informationalVersion[(suffixIndex + 1)..];
+        }
 
         private static void Write(string level, string category, string message, Exception? exception)
         {

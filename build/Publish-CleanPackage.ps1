@@ -62,6 +62,15 @@ function Get-PackageVersion {
     return "0.0.0-local"
 }
 
+function Get-GitCommitId {
+    $commit = (& git -C $repoRoot rev-parse HEAD 2>$null)
+    if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($commit)) {
+        return $commit.Trim()
+    }
+
+    return ""
+}
+
 function Remove-PackageRuntimeState {
     param([string]$AppDir)
 
@@ -125,12 +134,14 @@ $appBaseIntermediate = Join-Path $repoRoot "ExpressPackingMonitoring\obj_publish
 $launcherBaseOutput = Join-Path $repoRoot "ExpressPackingMonitoring.Launcher\bin_publish_tmp\clean-package-launcher\"
 $launcherBaseIntermediate = Join-Path $repoRoot "ExpressPackingMonitoring.Launcher\obj_publish_tmp\clean-package-launcher\"
 $packageVersion = Get-PackageVersion
+$gitCommitId = Get-GitCommitId
 
 Invoke-DotNetPublish $appProject `
     -c $Configuration `
     -r $Runtime `
     --self-contained true `
     -p:InformationalVersion=$packageVersion `
+    -p:GitCommitId=$gitCommitId `
     -p:PublishSingleFile=false `
     -p:BaseOutputPath=$appBaseOutput `
     -p:BaseIntermediateOutputPath=$appBaseIntermediate `
