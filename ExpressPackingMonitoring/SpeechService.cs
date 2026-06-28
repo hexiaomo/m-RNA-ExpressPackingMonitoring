@@ -22,6 +22,7 @@ namespace ExpressPackingMonitoring.Services
         public bool IsWarning { get; set; }
         public int RepeatCount { get; set; } = 1;
         public bool PreferImmediateAiGeneration { get; set; }
+        public bool PlayRemarkTone { get; set; }
     }
 
     public class SpeechService : IDisposable
@@ -250,6 +251,11 @@ namespace ExpressPackingMonitoring.Services
                         if (req.IsWarning)
                         {
                             PlayWarningAlertToneBlocking();
+                            if (_speechCancelRequested || _isDisposed) continue;
+                        }
+                        else if (req.PlayRemarkTone)
+                        {
+                            PlayRemarkToneBlocking();
                             if (_speechCancelRequested || _isDisposed) continue;
                         }
 
@@ -919,6 +925,24 @@ namespace ExpressPackingMonitoring.Services
             return _warningAlertToneWav ??= BuildWarningAlertToneWav();
         }
 
+        private void PlayRemarkToneBlocking()
+        {
+            try
+            {
+                PlayWavBlocking(GetRemarkToneWav());
+            }
+            catch (Exception ex)
+            {
+                // Remark tone failure must not block the following voice prompt.
+                Debug.WriteLine($"[SpeechService] Remark tone playback error: {ex.Message}");
+            }
+        }
+
+        private static byte[] GetRemarkToneWav()
+        {
+            return _remarkToneWav ??= BuildRemarkToneWav();
+        }
+
         private static byte[] BuildWarningAlertToneWav()
         {
             const int sampleRate = 22050;
@@ -927,6 +951,36 @@ namespace ExpressPackingMonitoring.Services
             const float volume = 0.72f;
 
             int[] tones = [880, 660, 880, 660];
+            int toneSamples = sampleRate * toneMs / 1000;
+            int gapSamples = sampleRate * gapMs / 1000;
+            var samples = new float[tones.Length * toneSamples + (tones.Length - 1) * gapSamples];
+            int offset = 0;
+
+            foreach (int frequency in tones)
+            {
+                for (int i = 0; i < toneSamples; i++)
+                {
+                    double t = i / (double)sampleRate;
+                    double envelope = BuildToneEnvelope(i, toneSamples);
+                    samples[offset + i] = (float)(Math.Sin(2.0 * Math.PI * frequency * t) * volume * envelope);
+                }
+
+                offset += toneSamples;
+                if (offset < samples.Length)
+                    offset += gapSamples;
+            }
+
+            return BuildWav16(samples, sampleRate);
+        }
+
+        private static byte[] BuildRemarkToneWav()
+        {
+            const int sampleRate = 22050;
+            const int toneMs = 120;
+            const int gapMs = 45;
+            const float volume = 0.50f;
+
+            int[] tones = [660, 880];
             int toneSamples = sampleRate * toneMs / 1000;
             int gapSamples = sampleRate * gapMs / 1000;
             var samples = new float[tones.Length * toneSamples + (tones.Length - 1) * gapSamples];
@@ -960,6 +1014,7 @@ namespace ExpressPackingMonitoring.Services
         }
 
         private static byte[]? _warningAlertToneWav;
+        private static byte[]? _remarkToneWav;
 
         private void PlayWavBlocking(byte[] wavData)
         {
@@ -1036,6 +1091,13 @@ namespace ExpressPackingMonitoring.Services
             if (!EnableSoundPrompt) return;
             if (cancelPrevious) Stop();
             EnqueueSpeechRequest(new SpeechRequest { Text = text, IsWarning = false, RepeatCount = 1 });
+        }
+
+        public void SpeakWithRemarkTone(string text, bool cancelPrevious = true)
+        {
+            if (!EnableSoundPrompt) return;
+            if (cancelPrevious) Stop();
+            EnqueueSpeechRequest(new SpeechRequest { Text = text, IsWarning = false, RepeatCount = 1, PlayRemarkTone = true });
         }
 
         public void Preview(string text)

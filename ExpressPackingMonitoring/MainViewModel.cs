@@ -641,11 +641,11 @@ namespace ExpressPackingMonitoring.ViewModels
                     {
                         if (Config.AnnounceBuyerMessage && !string.IsNullOrWhiteSpace(orderInfo.BuyerMessage))
                         {
-                            Speak($"买家留言，{orderInfo.BuyerMessage}", cancelPrevious: false);
+                            SpeakWithRemarkTone($"买家留言，{orderInfo.BuyerMessage}", cancelPrevious: false);
                         }
                         if (Config.AnnounceSellerMemo && !string.IsNullOrWhiteSpace(orderInfo.SellerMemo))
                         {
-                            Speak($"卖家备注，{orderInfo.SellerMemo}", cancelPrevious: false);
+                            SpeakWithRemarkTone($"卖家备注，{orderInfo.SellerMemo}", cancelPrevious: false);
                         }
                         if (Config.AnnounceProductInfo && !string.IsNullOrWhiteSpace(orderInfo.ProductInfo))
                         {
@@ -2064,9 +2064,8 @@ namespace ExpressPackingMonitoring.ViewModels
             }
         }
 
-
-
-                private void Speak(string text, bool cancelPrevious = true) => _speechService?.Speak(text, cancelPrevious);
+        private void Speak(string text, bool cancelPrevious = true) => _speechService?.Speak(text, cancelPrevious);
+        private void SpeakWithRemarkTone(string text, bool cancelPrevious = true) => _speechService?.SpeakWithRemarkTone(text, cancelPrevious);
         private void SpeakWarning(string text, int repeatCount = 1, bool cancelPrevious = true) => _speechService?.SpeakWarning(text, repeatCount, cancelPrevious);
 
         public void Dispose()
