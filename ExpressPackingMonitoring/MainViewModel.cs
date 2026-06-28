@@ -48,6 +48,7 @@ namespace ExpressPackingMonitoring.ViewModels
         private BlockingCollection<Mat> _videoWriteQueue;
         private Task _writeTask;
         private Task _lastFinalizeTask;
+        private Task _mkvRecoveryTask;
         private CancellationTokenSource _writeCts;
         private int _actualCameraFps = 15; // 摄像头硬件实际帧率
         private readonly object _audioLock = new object();
@@ -126,6 +127,7 @@ namespace ExpressPackingMonitoring.ViewModels
 
         private readonly SemaphoreSlim _recorderLock = new SemaphoreSlim(1, 1);
         private readonly SemaphoreSlim _mkvConvertLock = new SemaphoreSlim(1, 1);
+        private readonly SemaphoreSlim _shutdownLock = new SemaphoreSlim(1, 1);
         private bool _isInputOnCooldown = false;
         private string _pendingScanDuringCooldown = "";
         private Process _currentFfmpegProcess;
@@ -1047,7 +1049,7 @@ namespace ExpressPackingMonitoring.ViewModels
             StartWebServer();
 
             // 启动时自动将上次断电残留的 MKV 转换为 MP4
-            Task.Run(RecoverOrphanedMkvAsync);
+            _mkvRecoveryTask = Task.Run(RecoverOrphanedMkvAsync);
         }
 
         private async Task RecoverOrphanedMkvAsync()
@@ -1071,6 +1073,80 @@ namespace ExpressPackingMonitoring.ViewModels
             catch (Exception ex)
             {
                 Debug.WriteLine($"[MkvRecover] 异常: {ex.Message}");
+            }
+        }
+
+        public async Task<bool> SaveRecordingsBeforeShutdownAsync(IProgress<string> progress = null)
+        {
+            if (_isDisposed) return true;
+            if (!await _shutdownLock.WaitAsync(0)) return false;
+
+            bool previousBusy = IsBusy;
+            string previousBusyText = BusyText;
+            try
+            {
+                RuntimeLog.Info("Shutdown", $"Save before shutdown start recording={IsRecording}");
+                progress?.Report("正在保存录像，请稍候...");
+                IsBusy = true;
+                BusyText = "正在保存录像，请稍候...";
+
+                if (IsRecording)
+                {
+                    progress?.Report("正在停止当前录像...");
+                    await _recorderLock.WaitAsync();
+                    try
+                    {
+                        if (IsRecording)
+                        {
+                            _stopReason = "程序退出";
+                            PauseSpeechForRecording();
+                            await InternalStopRecordingAsync();
+                        }
+                    }
+                    finally
+                    {
+                        if (!IsRecording)
+                            ResumeSpeechWhenCameraIdle();
+                        _recorderLock.Release();
+                    }
+                }
+
+                if (_lastFinalizeTask != null)
+                {
+                    progress?.Report("正在写入录像记录...");
+                    await _lastFinalizeTask;
+                }
+
+                if (_mkvRecoveryTask != null && !_mkvRecoveryTask.IsCompleted)
+                {
+                    progress?.Report("正在等待后台录像恢复...");
+                    await _mkvRecoveryTask;
+                }
+
+                progress?.Report("正在合成 MP4 录像...");
+                var result = await BatchConvertMkvToMp4Async(progress, CancellationToken.None);
+                RuntimeLog.Info("Shutdown", $"Save before shutdown done success={result.success}, fail={result.fail}, skip={result.skip}");
+
+                if (result.fail > 0)
+                {
+                    ShowToast("录像保存失败，请检查日志");
+                    RuntimeLog.Warn("Shutdown", $"Save before shutdown failed, failedConversions={result.fail}");
+                    return false;
+                }
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                ShowToast("录像保存失败，请检查日志");
+                RuntimeLog.Error("Shutdown", "Save before shutdown exception", ex);
+                return false;
+            }
+            finally
+            {
+                IsBusy = previousBusy && !_isDisposed;
+                BusyText = previousBusy ? previousBusyText : "";
+                _shutdownLock.Release();
             }
         }
 
@@ -1366,7 +1442,7 @@ namespace ExpressPackingMonitoring.ViewModels
                         Speak("摄像头已休眠");
                         Debug.WriteLine($"[Idle] 摄像头休眠: 空闲{idleMinutes:F1}分钟");
                         RuntimeLog.Info("MkvRecover", "Camera idle, start pending MKV conversion");
-                        Task.Run(RecoverOrphanedMkvAsync);
+                        _mkvRecoveryTask = Task.Run(RecoverOrphanedMkvAsync);
                     });
                 }
             }

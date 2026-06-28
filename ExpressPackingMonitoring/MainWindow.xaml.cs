@@ -22,6 +22,8 @@ namespace ExpressPackingMonitoring
         private DateTime _lastMouseActivityNotifyAt = DateTime.MinValue;
         private const int WM_ENTERSIZEMOVE = 0x0231;
         private const int WM_EXITSIZEMOVE = 0x0232;
+        private bool _shutdownConfirmed;
+        private bool _shutdownInProgress;
 
         private bool IsCapsLockOn() => (GetKeyState(VK_CAPITAL) & 1) != 0;
 
@@ -295,9 +297,18 @@ namespace ExpressPackingMonitoring
             if (!ScanInputTextBox.IsKeyboardFocusWithin) { e.Handled = true; ScanInputTextBox.Focus(); }
         }
 
-        private void Window_Closing(object sender, System.ComponentModel.CancelEventArgs e)
+        private async void Window_Closing(object sender, System.ComponentModel.CancelEventArgs e)
         {
             var vm = DataContext as MainViewModel;
+
+            if (_shutdownConfirmed)
+            {
+                FinishShutdown(vm);
+                return;
+            }
+
+            e.Cancel = true;
+            if (_shutdownInProgress) return;
 
             // 1. 判断是否需要提示：只有正在录制时才提示
             if (vm != null && vm.IsRecording)
@@ -313,18 +324,43 @@ namespace ExpressPackingMonitoring
                 }
             }
 
-            // 2. 执行到这里说明：要么没在录制，要么用户点击了确定退出
+            _shutdownInProgress = true;
             _capsCheckTimer.Stop();
             RestoreCapsLockState();
-            
-            // 调用 Dispose 确保资源释放（内部会触发 StopRecording 保存视频）
+            RuntimeLog.Info("Shutdown", "Main window closing requested");
+
+            bool saved = true;
+            if (vm != null)
+            {
+                var progress = new Progress<string>(msg =>
+                {
+                    vm.BusyText = msg;
+                    vm.IsBusy = true;
+                    vm.ShowToast(msg);
+                });
+                saved = await vm.SaveRecordingsBeforeShutdownAsync(progress);
+            }
+
+            if (!saved)
+            {
+                _shutdownInProgress = false;
+                MessageBox.Show("录像保存失败，请检查日志", "退出已取消", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            _shutdownConfirmed = true;
+            Close();
+        }
+
+        private void FinishShutdown(MainViewModel? vm)
+        {
+            _capsCheckTimer.Stop();
+            RestoreCapsLockState();
+
             if (vm is System.IDisposable disposable) 
             {
                 disposable.Dispose();
             }
-
-            // 彻底杀掉进程，防止后台残留
-            System.Environment.Exit(0);
         }
     }
 }
