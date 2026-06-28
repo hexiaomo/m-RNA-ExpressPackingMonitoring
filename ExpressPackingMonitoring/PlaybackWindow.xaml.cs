@@ -51,7 +51,7 @@ namespace ExpressPackingMonitoring
                 {
                     string reason = string.IsNullOrEmpty(DeleteReason) ? "已删除" : DeleteReason;
                     string time = DeletedAt?.ToString("MM-dd HH:mm") ?? "";
-                    return $"已覆盖 ({reason} {time})";
+                    return $"已清理 ({reason} {time})";
                 }
 
                 return IsMissing ? "文件已丢失" : "";

@@ -264,6 +264,7 @@
                 <Grid>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*"/>
+                        <ColumnDefinition x:Name="UnitColumn" Width="Auto"/>
                         <ColumnDefinition x:Name="SpinnerColumn" Width="28"/>
                     </Grid.ColumnDefinitions>
                     <TextBox x:Name="PART_TextBox"
@@ -275,8 +276,16 @@
                              Padding="{TemplateBinding Padding}"
                              Margin="0"
                              Focusable="True"/>
+                    <TextBlock x:Name="UnitText"
+                               Grid.Column="1"
+                               Text="{TemplateBinding Tag}"
+                               Foreground="{DynamicResource TextSecondary}"
+                               FontSize="12"
+                               Margin="4,0,10,0"
+                               VerticalAlignment="Center"
+                               IsHitTestVisible="False"/>
                     <Border x:Name="SpinnerHost"
-                            Grid.Column="1"
+                            Grid.Column="2"
                             Background="{DynamicResource ControlBackground}"
                             BorderBrush="{DynamicResource BorderLight}"
                             BorderThickness="1,0,0,0"
@@ -306,6 +315,10 @@
                 <Trigger Property="ShowButtonSpinner" Value="False">
                     <Setter TargetName="SpinnerColumn" Property="Width" Value="0"/>
                     <Setter TargetName="SpinnerHost" Property="Visibility" Value="Collapsed"/>
+                </Trigger>
+                <Trigger Property="Tag" Value="{x:Null}">
+                    <Setter TargetName="UnitColumn" Property="Width" Value="0"/>
+                    <Setter TargetName="UnitText" Property="Visibility" Value="Collapsed"/>
                 </Trigger>
             </ControlTemplate.Triggers>
         </ControlTemplate>
@@ -319,6 +332,7 @@
                 <Grid>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*"/>
+                        <ColumnDefinition x:Name="UnitColumn" Width="Auto"/>
                         <ColumnDefinition x:Name="SpinnerColumn" Width="28"/>
                     </Grid.ColumnDefinitions>
                     <TextBox x:Name="PART_TextBox"
@@ -330,8 +344,16 @@
                              Padding="{TemplateBinding Padding}"
                              Margin="0"
                              Focusable="True"/>
+                    <TextBlock x:Name="UnitText"
+                               Grid.Column="1"
+                               Text="{TemplateBinding Tag}"
+                               Foreground="{DynamicResource TextSecondary}"
+                               FontSize="12"
+                               Margin="4,0,10,0"
+                               VerticalAlignment="Center"
+                               IsHitTestVisible="False"/>
                     <Border x:Name="SpinnerHost"
-                            Grid.Column="1"
+                            Grid.Column="2"
                             Background="{DynamicResource ControlBackground}"
                             BorderBrush="{DynamicResource BorderLight}"
                             BorderThickness="1,0,0,0"
@@ -361,6 +383,10 @@
                 <Trigger Property="ShowButtonSpinner" Value="False">
                     <Setter TargetName="SpinnerColumn" Property="Width" Value="0"/>
                     <Setter TargetName="SpinnerHost" Property="Visibility" Value="Collapsed"/>
+                </Trigger>
+                <Trigger Property="Tag" Value="{x:Null}">
+                    <Setter TargetName="UnitColumn" Property="Width" Value="0"/>
+                    <Setter TargetName="UnitText" Property="Visibility" Value="Collapsed"/>
                 </Trigger>
             </ControlTemplate.Triggers>
         </ControlTemplate>
@@ -822,7 +848,7 @@
                                                   Style="{StaticResource ToggleSwitchStyle}"/>
                                     </Grid>
 
-                                    <Grid Style="{StaticResource SettingRowStyle}"
+                                    <Grid Style="{StaticResource SettingRowStyle}" Margin="0,0,0,0"
                                           IsEnabled="{Binding IsChecked, ElementName=AudioRecordCheckBox, TargetNullValue=False}">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*"/>
@@ -950,6 +976,7 @@
                                         </StackPanel>
                                         <xctk:IntegerUpDown Grid.Column="2"
                                                            Height="36"
+                                                           Tag="ms"
                                                            Value="{Binding Config.AudioSyncOffsetMs}"
                                                            Minimum="-5000"
                                                            Maximum="5000"
@@ -968,7 +995,7 @@
                         <StackPanel>
                             <Border Style="{StaticResource SectionCardStyle}">
                                 <StackPanel>
-                                    <Grid Style="{StaticResource SettingRowStyle}">
+                                    <Grid Style="{StaticResource SettingRowStyle}" Margin="0,0,0,0">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*"/>
                                             <ColumnDefinition Width="24"/>
@@ -1017,12 +1044,13 @@
                                             <ColumnDefinition Width="260"/>
                                         </Grid.ColumnDefinitions>
                                         <StackPanel Margin="0,0,16,0">
-                                            <TextBlock Text="放大前等待 / 秒" Style="{StaticResource FieldLabelStyle}"/>
+                                            <TextBlock Text="放大前等待" Style="{StaticResource FieldLabelStyle}"/>
                                             <TextBlock Text="开始录制后等待多久再放大。"
                                                        Style="{StaticResource FieldHintStyle}"/>
                                         </StackPanel>
                                         <xctk:DoubleUpDown Grid.Column="2"
                                                            Height="36"
+                                                           Tag="秒"
                                                            Value="{Binding Config.ZoomDelaySeconds}"
                                                            Minimum="0"
                                                            Increment="0.5"/>
@@ -1035,12 +1063,13 @@
                                             <ColumnDefinition Width="260"/>
                                         </Grid.ColumnDefinitions>
                                         <StackPanel Margin="0,0,16,0">
-                                            <TextBlock Text="放大停留时间 / 秒" Style="{StaticResource FieldLabelStyle}"/>
+                                            <TextBlock Text="放大停留时间" Style="{StaticResource FieldLabelStyle}"/>
                                             <TextBlock Text="放大画面保持多久后恢复。"
                                                        Style="{StaticResource FieldHintStyle}"/>
                                         </StackPanel>
                                         <xctk:DoubleUpDown Grid.Column="2"
                                                            Height="36"
+                                                           Tag="秒"
                                                            Value="{Binding Config.ZoomDurationSeconds}"
                                                            Minimum="0"
                                                            Increment="0.5"/>
@@ -1075,12 +1104,13 @@
                                             <ColumnDefinition Width="260"/>
                                         </Grid.ColumnDefinitions>
                                         <StackPanel Margin="0,0,16,0">
-                                            <TextBlock Text="过渡时长 / 毫秒" Style="{StaticResource FieldLabelStyle}"/>
+                                            <TextBlock Text="过渡时长" Style="{StaticResource FieldLabelStyle}"/>
                                             <TextBlock Text="动画持续时间。"
                                                        Style="{StaticResource FieldHintStyle}"/>
                                         </StackPanel>
                                         <xctk:DoubleUpDown Grid.Column="2"
                                                            Height="36"
+                                                           Tag="ms"
                                                            Value="{Binding Config.ZoomAnimationDurationMs}"
                                                            Minimum="50"
                                                            Maximum="2000"
@@ -1127,12 +1157,13 @@
                                             <ColumnDefinition Width="260"/>
                                         </Grid.ColumnDefinitions>
                                         <StackPanel Margin="0,0,16,0">
-                                            <TextBlock Text="静止超时 / 分钟" Style="{StaticResource FieldLabelStyle}"/>
+                                            <TextBlock Text="静止超时" Style="{StaticResource FieldLabelStyle}"/>
                                             <TextBlock Text="画面不动超过这个时间后停止录像。"
                                                        Style="{StaticResource FieldHintStyle}"/>
                                         </StackPanel>
                                         <xctk:DoubleUpDown Grid.Column="2"
                                                            Height="36"
+                                                           Tag="分钟"
                                                            Value="{Binding Config.AutoStopMinutes}"
                                                            Minimum="0.1"
                                                            Maximum="60.0"
@@ -1146,12 +1177,13 @@
                                             <ColumnDefinition Width="260"/>
                                         </Grid.ColumnDefinitions>
                                         <StackPanel Margin="0,0,16,0">
-                                            <TextBlock Text="提前提醒时间 / 秒" Style="{StaticResource FieldLabelStyle}"/>
+                                            <TextBlock Text="提前提醒时间" Style="{StaticResource FieldLabelStyle}"/>
                                             <TextBlock Text="快要自动停止录像前，提前多久提醒。"
                                                        Style="{StaticResource FieldHintStyle}"/>
                                         </StackPanel>
                                         <xctk:DoubleUpDown Grid.Column="2"
                                                            Height="36"
+                                                           Tag="秒"
                                                            Value="{Binding Config.TimeoutWarningSeconds}"
                                                            Minimum="3"
                                                            Maximum="120"
@@ -1186,12 +1218,13 @@
                                             <ColumnDefinition Width="260"/>
                                         </Grid.ColumnDefinitions>
                                         <StackPanel Margin="0,0,16,0">
-                                            <TextBlock Text="最大时长 / 分钟" Style="{StaticResource FieldLabelStyle}"/>
+                                            <TextBlock Text="最大时长" Style="{StaticResource FieldLabelStyle}"/>
                                             <TextBlock Text="单个录像超过这个时间就自动停止。"
                                                        Style="{StaticResource FieldHintStyle}"/>
                                         </StackPanel>
                                         <xctk:DoubleUpDown Grid.Column="2"
                                                            Height="36"
+                                                           Tag="分钟"
                                                            Value="{Binding Config.MaxDurationMinutes}"
                                                            Minimum="0.1"
                                                            Maximum="60.0"
@@ -1213,6 +1246,7 @@
                                         </StackPanel>
                                         <xctk:DoubleUpDown Grid.Column="2"
                                                            Height="36"
+                                                           Tag="秒"
                                                            Value="{Binding Config.MinRecordingSeconds}"
                                                            Minimum="0"
                                                            Maximum="30"
@@ -1248,12 +1282,13 @@
                                             <ColumnDefinition Width="260"/>
                                         </Grid.ColumnDefinitions>
                                         <StackPanel Margin="0,0,16,0">
-                                            <TextBlock Text="空闲超时 / 分钟" Style="{StaticResource FieldLabelStyle}"/>
+                                            <TextBlock Text="空闲超时" Style="{StaticResource FieldLabelStyle}"/>
                                             <TextBlock Text="空闲超过这个时间后关闭摄像头。"
                                                        Style="{StaticResource FieldHintStyle}"/>
                                         </StackPanel>
                                         <xctk:DoubleUpDown Grid.Column="2"
                                                            Height="36"
+                                                           Tag="分钟"
                                                            Value="{Binding Config.CameraIdleMinutes}"
                                                            Minimum="1"
                                                            Maximum="480"
@@ -1266,7 +1301,7 @@
                 </Border>
             </TabItem>
             <TabItem Header="存储管理">
-                <Border Background="Transparent" Padding="18,0,0,0">
+                <Border Background="Transparent" Padding="0,4,0,0">
                     <ScrollViewer VerticalScrollBarVisibility="Auto">
                         <StackPanel>
                             <Border Style="{StaticResource SectionCardStyle}">
@@ -1340,10 +1375,10 @@
                                                     </DataGridTemplateColumn.CellTemplate>
                                                 </DataGridTemplateColumn>
 
-                                                <DataGridTemplateColumn Header="最大容量 (GB)" Width="150">
+                                                <DataGridTemplateColumn Header="最大容量" Width="150">
                                                     <DataGridTemplateColumn.CellTemplate>
                                                         <DataTemplate>
-                                                            <xctk:DoubleUpDown ToolTip="最多允许这个目录保存多少 GB 录像。" Value="{Binding QuotaGB, UpdateSourceTrigger=PropertyChanged}"
+                                                            <xctk:DoubleUpDown ToolTip="最多允许这个目录保存多少 GB 录像。" Tag="GB" Value="{Binding QuotaGB, UpdateSourceTrigger=PropertyChanged}"
                                                                                Minimum="1"
                                                                                Maximum="10000"
                                                                                Margin="5"
@@ -1360,7 +1395,7 @@
                                                 <DataGridTemplateColumn Header="使用顺序" Width="140">
                                                     <DataGridTemplateColumn.CellTemplate>
                                                         <DataTemplate>
-                                                            <xctk:IntegerUpDown ToolTip="数字越小越先使用，普通用户可不改。" Value="{Binding Priority, UpdateSourceTrigger=PropertyChanged}"
+                                                            <xctk:IntegerUpDown ToolTip="数字越小优先级越高，普通用户可不改。" Value="{Binding Priority, UpdateSourceTrigger=PropertyChanged}"
                                                                                 Minimum="0"
                                                                                 Maximum="99"
                                                                                 Margin="5"
@@ -1400,7 +1435,7 @@
                                             <ColumnDefinition Width="260"/>
                                         </Grid.ColumnDefinitions>
                                         <StackPanel Margin="0,0,16,0">
-                                            <TextBlock Text="显示已覆盖记录" Style="{StaticResource FieldLabelStyle}"/>
+                                            <TextBlock Text="显示已清理记录" Style="{StaticResource FieldLabelStyle}"/>
                                             <TextBlock Text="视频文件被清理后，列表里仍显示这条记录。"
                                                        Style="{StaticResource FieldHintStyle}"/>
                                         </StackPanel>
@@ -1539,6 +1574,7 @@
                                         </StackPanel>
                                         <xctk:DoubleUpDown Grid.Column="2"
                                                            Height="36"
+                                                           Tag="倍"
                                                            Value="{Binding Config.AiTtsSpeed}"
                                                            Minimum="0.5"
                                                            Maximum="2.0"
@@ -1807,7 +1843,7 @@
                                                             Increment="1"/>
                                     </Grid>
 
-                                    <Grid Style="{StaticResource SettingRowStyle}" Margin="0,0,0,14"
+                                    <Grid Style="{StaticResource SettingRowStyle}" Margin="0,0,0,0"
                                           ToolTip="缓存用于把部分视频临时转成更容易在线播放的格式，超出上限后会自动清理。">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*"/>
@@ -1815,12 +1851,13 @@
                                             <ColumnDefinition Width="260"/>
                                         </Grid.ColumnDefinitions>
                                         <StackPanel Margin="0,0,16,0">
-                                            <TextBlock Text="在线播放缓存上限 (MB)" Style="{StaticResource FieldLabelStyle}"/>
+                                            <TextBlock Text="在线播放缓存上限" Style="{StaticResource FieldLabelStyle}"/>
                                             <TextBlock Text="在线播放部分视频时产生的临时缓存。"
                                                        Style="{StaticResource FieldHintStyle}"/>
                                         </StackPanel>
                                         <xctk:IntegerUpDown Grid.Column="2"
                                                             Height="36"
+                                                            Tag="MB"
                                                             Value="{Binding Config.TranscodeCacheMaxMB}"
                                                             Minimum="128"
                                                             Maximum="10240"
@@ -2025,12 +2062,13 @@
                                             <ColumnDefinition Width="260"/>
                                         </Grid.ColumnDefinitions>
                                         <StackPanel Margin="0,0,16,0">
-                                            <TextBlock Text="扫码间隔保护 (秒)" Style="{StaticResource FieldLabelStyle}"/>
+                                            <TextBlock Text="扫码间隔保护" Style="{StaticResource FieldLabelStyle}"/>
                                             <TextBlock Text="防止扫码枪连续触发太快。"
                                                        Style="{StaticResource FieldHintStyle}"/>
                                         </StackPanel>
                                         <xctk:DoubleUpDown Grid.Column="2"
                                                            Height="36"
+                                                           Tag="秒"
                                                            Value="{Binding Config.BarcodeCooldownSeconds}"
                                                            Minimum="0.5"
                                                            Maximum="10.0"
@@ -2072,6 +2110,41 @@
                         <StackPanel>
                             <Border Style="{StaticResource SectionCardStyle}">
                                 <StackPanel>
+                                    <Grid Margin="0,0,0,18">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="16"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+                                        <Border Width="72"
+                                                Height="72"
+                                                CornerRadius="14"
+                                                Background="{DynamicResource ControlBackground}"
+                                                BorderBrush="{DynamicResource BorderLight}"
+                                                BorderThickness="1">
+                                            <Image Source="app.ico"
+                                                   Width="56"
+                                                   Height="56"
+                                                   Stretch="Uniform"
+                                                   RenderOptions.BitmapScalingMode="HighQuality"/>
+                                        </Border>
+                                        <StackPanel Grid.Column="2" VerticalAlignment="Center">
+                                            <TextBlock Text="快递打包监控"
+                                                       FontSize="18"
+                                                       FontWeight="SemiBold"
+                                                       Foreground="{DynamicResource TextPrimary}"/>
+                                            <TextBlock Text="{Binding AppVersion, StringFormat=版本 {0}}"
+                                                       Margin="0,5,0,0"
+                                                       FontSize="12"
+                                                       Foreground="{DynamicResource TextSecondary}"/>
+                                            <TextBlock Text="面向电商打包场景的录像、回放和订单联动工具。"
+                                                       Margin="0,6,0,0"
+                                                       FontSize="12"
+                                                       Foreground="{DynamicResource TextSecondary}"
+                                                       TextWrapping="Wrap"/>
+                                        </StackPanel>
+                                    </Grid>
+
                                     <Grid Style="{StaticResource SettingRowStyle}" Margin="0,0,0,12">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*"/>

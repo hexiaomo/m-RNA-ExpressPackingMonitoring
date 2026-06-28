@@ -11,6 +11,7 @@ using System.Windows.Input;
 using System.Threading;
 using System.IO;
 using System.Diagnostics;
+using System.Reflection;
 using ExpressPackingMonitoring.Services;
 using NAudio.CoreAudioApi;
 
@@ -33,6 +34,7 @@ namespace ExpressPackingMonitoring
         public AppConfig Config { get; set; }
         public double CurrentDiskUsagePercent { get; set; }
         public string CurrentDiskUsageText { get; set; }
+        public string AppVersion { get; } = GetAppVersion();
         public List<EdgeVoiceOption> EdgeVoiceOptions { get; } = new()
         {
             new EdgeVoiceOption { ShortName = "zh-CN-XiaoxiaoNeural", DisplayName = "晓晓 - 女声" },
@@ -454,14 +456,27 @@ namespace ExpressPackingMonitoring
             if (dialog.ShowDialog(this) == true)
             {
                 string selectedPath = dialog.FolderName;
+                if (Config.StorageLocations.Any(x => string.Equals(x.Path, selectedPath, StringComparison.OrdinalIgnoreCase)))
+                {
+                    MessageBox.Show("该路径已在列表中。", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+                    return;
+                }
+                string selectedRoot = GetStorageRoot(selectedPath);
+                StorageLocation sameDisk = Config.StorageLocations.FirstOrDefault(x =>
+                    !string.IsNullOrWhiteSpace(x.Path) &&
+                    string.Equals(GetStorageRoot(x.Path), selectedRoot, StringComparison.OrdinalIgnoreCase));
+                if (sameDisk != null)
+                {
+                    MessageBox.Show(
+                        $"同一个磁盘已经添加过：\n{sameDisk.Path}\n\n请换一个磁盘，或直接调整已有路径的容量和使用顺序。",
+                        "磁盘已存在",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Information);
+                    return;
+                }
                 if (!IsPathWritable(selectedPath))
                 {
                     MessageBox.Show("所选路径不可写，请检查权限或磁盘状态。", "存储错误", MessageBoxButton.OK, MessageBoxImage.Warning);
-                    return;
-                }
-                if (Config.StorageLocations.Any(x => x.Path.Equals(selectedPath, StringComparison.OrdinalIgnoreCase)))
-                {
-                    MessageBox.Show("该路径已在列表中。", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
                     return;
                 }
 
@@ -790,6 +805,32 @@ namespace ExpressPackingMonitoring
         private void OpenLicense_Click(object sender, RoutedEventArgs e)
         {
             OpenExternalUrl("https://github.com/m-RNA/ExpressPackingMonitoring/blob/main/LICENSE");
+        }
+
+        private static string GetStorageRoot(string path)
+        {
+            try
+            {
+                string fullPath = Path.GetFullPath(path.Trim());
+                return Path.GetPathRoot(fullPath)?.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) ?? fullPath;
+            }
+            catch
+            {
+                return path?.Trim().TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) ?? "";
+            }
+        }
+
+        private static string GetAppVersion()
+        {
+            var assembly = Assembly.GetExecutingAssembly();
+            var infoVersion = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+            if (!string.IsNullOrWhiteSpace(infoVersion))
+            {
+                return infoVersion;
+            }
+
+            Version version = assembly.GetName().Version;
+            return version != null ? $"{version.Major}.{version.Minor}.{version.Build}" : "未知版本";
         }
 
         private static void OpenExternalUrl(string url)
