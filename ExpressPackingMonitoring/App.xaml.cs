@@ -17,6 +17,7 @@ namespace ExpressPackingMonitoring
             RegisterRuntimeExceptionLogging();
             RuntimeLog.Info("App", "Application startup");
             RuntimeLog.LogBuildInfo();
+            ShutdownMode = ShutdownMode.OnExplicitShutdown;
 
             if (AudioProbe.TryHandleCommandLine(e.Args, out int exitCode))
             {
@@ -74,6 +75,7 @@ namespace ExpressPackingMonitoring
             MainWindow = window;
             _instanceCoordinator?.StartActivationListener(window);
             window.Show();
+            ShutdownMode = ShutdownMode.OnMainWindowClose;
         }
 
         protected override void OnExit(ExitEventArgs e)
