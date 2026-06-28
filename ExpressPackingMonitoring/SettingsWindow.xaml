@@ -412,13 +412,6 @@
             <Setter Property="Foreground" Value="{DynamicResource TextPrimary}"/>
         </Style>
 
-        <Style x:Key="SectionHintStyle" TargetType="TextBlock">
-            <Setter Property="Margin" Value="0,4,0,0"/>
-            <Setter Property="FontSize" Value="12"/>
-            <Setter Property="Foreground" Value="{DynamicResource TextSecondary}"/>
-            <Setter Property="TextWrapping" Value="Wrap"/>
-        </Style>
-
         <Style x:Key="FieldLabelStyle" TargetType="TextBlock">
             <Setter Property="FontSize" Value="13"/>
             <Setter Property="FontWeight" Value="SemiBold"/>
@@ -738,10 +731,6 @@
                         <StackPanel>
                             <Border Style="{StaticResource SectionCardStyle}">
                                 <StackPanel>
-                                    <TextBlock Text="先选这台电脑的用途和界面外观。"
-                                               Style="{StaticResource SectionHintStyle}"/>
-                                    <Border Style="{StaticResource SectionDividerStyle}"/>
-
                                     <Grid Style="{StaticResource SettingRowStyle}">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*"/>
@@ -856,10 +845,6 @@
 
                             <Border Style="{StaticResource SectionCardStyle}">
                                 <StackPanel>
-                                    <TextBlock Text="调整录像清晰度、文件大小和电脑占用。"
-                                               Style="{StaticResource SectionHintStyle}"/>
-                                    <Border Style="{StaticResource SectionDividerStyle}"/>
-
                                     <Grid Style="{StaticResource SettingRowStyle}"
                                           ToolTip="H.265/HEVC 体积更小，但部分电脑或浏览器可能无法直接播放；H.264 兼容性更好。">
                                         <Grid.ColumnDefinitions>
@@ -983,10 +968,6 @@
                         <StackPanel>
                             <Border Style="{StaticResource SectionCardStyle}">
                                 <StackPanel>
-                                    <TextBlock Text="开始录制时，画面会自动向中心放大一段时间，方便拍清快递面单。"
-                                               Style="{StaticResource SectionHintStyle}"
-                                               Margin="0,0,0,14"/>
-
                                     <Grid Style="{StaticResource SettingRowStyle}">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*"/>
@@ -1118,10 +1099,6 @@
                         <StackPanel>
                             <Border Style="{StaticResource SectionCardStyle}">
                                 <StackPanel>
-                                    <TextBlock Text="设置录像什么时候自动结束，以及空闲时是否关闭摄像头。"
-                                               Style="{StaticResource SectionHintStyle}"/>
-                                    <Border Style="{StaticResource SectionDividerStyle}"/>
-
                                     <Grid Style="{StaticResource SettingRowStyle}" Margin="0,0,0,14">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*"/>
@@ -1294,10 +1271,6 @@
                         <StackPanel>
                             <Border Style="{StaticResource SectionCardStyle}">
                                 <StackPanel>
-                                    <TextBlock Text="设置录像保存到哪里，以及每个位置最多用多少空间。"
-                                               Style="{StaticResource SectionHintStyle}"/>
-                                    <Border Style="{StaticResource SectionDividerStyle}"/>
-
                                     <Border BorderBrush="{DynamicResource BorderLight}"
                                             BorderThickness="1"
                                             CornerRadius="8"
@@ -1420,10 +1393,6 @@
 
                             <Border Style="{StaticResource SectionCardStyle}">
                                 <StackPanel>
-                                    <TextBlock Text="控制已清理的视频记录是否还出现在回放列表。"
-                                               Style="{StaticResource SectionHintStyle}"/>
-                                    <Border Style="{StaticResource SectionDividerStyle}"/>
-
                                     <Grid Style="{StaticResource SettingRowStyle}" Margin="0">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*"/>
@@ -1446,10 +1415,6 @@
 
                             <Border Style="{StaticResource SectionCardStyle}">
                                 <StackPanel>
-                                    <TextBlock Text="把旧版本录像转换成更容易播放的格式。"
-                                               Style="{StaticResource SectionHintStyle}"/>
-                                    <Border Style="{StaticResource SectionDividerStyle}"/>
-
                                     <Grid>
                                         <Grid.RowDefinitions>
                                             <RowDefinition Height="Auto"/>
@@ -1495,10 +1460,6 @@
                         <StackPanel>
                             <Border Style="{StaticResource SectionCardStyle}">
                                 <StackPanel>
-                                    <TextBlock Text="设置提醒声音、订单播报和语音效果。"
-                                               Style="{StaticResource SectionHintStyle}"/>
-                                    <Border Style="{StaticResource SectionDividerStyle}"/>
-
                                     <Grid Style="{StaticResource SettingRowStyle}">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*"/>
@@ -1609,10 +1570,6 @@
                                     </Style>
                                 </Border.Style>
                                 <StackPanel>
-                                    <TextBlock Text="给正常提示和警告提示选择不同声音。"
-                                               Style="{StaticResource SectionHintStyle}"/>
-                                    <Border Style="{StaticResource SectionDividerStyle}"/>
-
                                     <Grid ToolTip="Kokoro 声线编号由本地模型决定；不了解时保持默认即可。">
                                         <Grid.Style>
                                             <Style TargetType="Grid" BasedOn="{StaticResource SettingRowStyle}">
@@ -1759,10 +1716,6 @@
                                     </Style>
                                 </Border.Style>
                                 <StackPanel>
-                                    <TextBlock Text="先试听播报效果，再按商品名调整停顿。"
-                                               Style="{StaticResource SectionHintStyle}"/>
-                                    <Border Style="{StaticResource SectionDividerStyle}"/>
-
                                     <Grid Style="{StaticResource SettingRowStyle}">
                                         <Grid.RowDefinitions>
                                             <RowDefinition Height="Auto"/>
@@ -1816,10 +1769,6 @@
                         <StackPanel>
                             <Border Style="{StaticResource SectionCardStyle}">
                                 <StackPanel>
-                                    <TextBlock Text="同一网络里的电脑或手机可以用浏览器查看录像。"
-                                               Style="{StaticResource SectionHintStyle}"
-                                               Margin="0,0,0,14"/>
-
                                     <Grid Style="{StaticResource SettingRowStyle}" Margin="0,0,0,14">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*"/>
@@ -1883,10 +1832,6 @@
 
                             <Border Style="{StaticResource SectionCardStyle}">
                                 <StackPanel>
-                                    <TextBlock Text="扫码打包时，自动播报订单备注、留言和商品信息。"
-                                               Style="{StaticResource SectionHintStyle}"/>
-                                    <Border Style="{StaticResource SectionDividerStyle}"/>
-
                                     <Grid Style="{StaticResource SettingRowStyle}" Margin="0,0,0,14">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*"/>
@@ -1993,18 +1938,9 @@
                 <Border Background="Transparent" Padding="0,4,0,0">
                     <ScrollViewer VerticalScrollBarVisibility="Auto">
                         <StackPanel>
-                            <TextBlock Text="这些设置通常保持默认即可，只有需要调整扫码规则、开机启动或排查问题时再修改。"
-                                       Foreground="{DynamicResource TextSecondary}"
-                                       FontSize="12"
-                                       TextWrapping="Wrap"
-                                       Margin="0,0,0,14"/>
                             <!-- 水印设置 -->
                             <Border Style="{StaticResource SectionCardStyle}">
                                 <StackPanel>
-                                    <TextBlock Text="把单号和时间显示在录像画面上。"
-                                               Style="{StaticResource SectionHintStyle}"/>
-                                    <Border Style="{StaticResource SectionDividerStyle}"/>
-
                                     <Grid Style="{StaticResource SettingRowStyle}" Margin="0,0,0,0">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*"/>
@@ -2027,10 +1963,6 @@
 
                             <Border Style="{StaticResource SectionCardStyle}">
                                 <StackPanel>
-                                    <TextBlock Text="设置扫码枪输入、单号判断和开机启动。"
-                                               Style="{StaticResource SectionHintStyle}"/>
-                                    <Border Style="{StaticResource SectionDividerStyle}"/>
-
                                     <Grid Style="{StaticResource SettingRowStyle}">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*"/>
@@ -2109,10 +2041,6 @@
 
                             <Border Style="{StaticResource SectionCardStyle}">
                                 <StackPanel>
-                                    <TextBlock Text="排查录像或硬件问题时再使用。"
-                                               Style="{StaticResource SectionHintStyle}"/>
-                                    <Border Style="{StaticResource SectionDividerStyle}"/>
-
                                     <Grid Style="{StaticResource SettingRowStyle}" Margin="0,0,0,0"
                                           ToolTip="清除已保存的显卡编码检测结果，下次重新判断可用编码器。">
                                         <Grid.ColumnDefinitions>
@@ -2144,10 +2072,6 @@
                         <StackPanel>
                             <Border Style="{StaticResource SectionCardStyle}">
                                 <StackPanel>
-                                    <TextBlock Text="查看项目源码、许可证和开源使用说明。"
-                                               Style="{StaticResource SectionHintStyle}"/>
-                                    <Border Style="{StaticResource SectionDividerStyle}"/>
-
                                     <Grid Style="{StaticResource SettingRowStyle}" Margin="0,0,0,12">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*"/>
