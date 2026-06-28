@@ -84,7 +84,7 @@ namespace ExpressPackingMonitoring.ViewModels
         public double MinRecordingSeconds { get; set; } = 3.0;
         public int MinVideoFileSizeKB { get; set; } = 50;
         public bool EnableCameraIdle { get; set; } = true;
-        public double CameraIdleMinutes { get; set; } = 30.0;
+        public double CameraIdleMinutes { get; set; } = 5.0;
 
         public double MotionDetectThreshold { get; set; } = 15.0;
         public string OrderIdRegex { get; set; } = "^[a-zA-Z0-9-]{12,25}$";
