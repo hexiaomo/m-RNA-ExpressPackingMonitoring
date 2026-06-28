@@ -738,7 +738,6 @@
                         <StackPanel>
                             <Border Style="{StaticResource SectionCardStyle}">
                                 <StackPanel>
-                                    <TextBlock Text="基础设置" Style="{StaticResource SectionTitleStyle}"/>
                                     <TextBlock Text="先选这台电脑的用途和界面外观。"
                                                Style="{StaticResource SectionHintStyle}"/>
                                     <Border Style="{StaticResource SectionDividerStyle}"/>
@@ -857,7 +856,6 @@
 
                             <Border Style="{StaticResource SectionCardStyle}">
                                 <StackPanel>
-                                    <TextBlock Text="录像画质" Style="{StaticResource SectionTitleStyle}"/>
                                     <TextBlock Text="调整录像清晰度、文件大小和电脑占用。"
                                                Style="{StaticResource SectionHintStyle}"/>
                                     <Border Style="{StaticResource SectionDividerStyle}"/>
@@ -1120,7 +1118,6 @@
                         <StackPanel>
                             <Border Style="{StaticResource SectionCardStyle}">
                                 <StackPanel>
-                                    <TextBlock Text="提示与录制时长" Style="{StaticResource SectionTitleStyle}"/>
                                     <TextBlock Text="控制提醒声音，以及录像什么时候自动结束。"
                                                Style="{StaticResource SectionHintStyle}"/>
                                     <Border Style="{StaticResource SectionDividerStyle}"/>
@@ -1315,7 +1312,6 @@
                         <StackPanel>
                             <Border Style="{StaticResource SectionCardStyle}">
                                 <StackPanel>
-                                    <TextBlock Text="录像保存位置" Style="{StaticResource SectionTitleStyle}"/>
                                     <TextBlock Text="设置录像保存到哪里，以及每个位置最多用多少空间。"
                                                Style="{StaticResource SectionHintStyle}"/>
                                     <Border Style="{StaticResource SectionDividerStyle}"/>
@@ -1442,7 +1438,6 @@
 
                             <Border Style="{StaticResource SectionCardStyle}">
                                 <StackPanel>
-                                    <TextBlock Text="回放列表" Style="{StaticResource SectionTitleStyle}"/>
                                     <TextBlock Text="控制已清理的视频记录是否还出现在回放列表。"
                                                Style="{StaticResource SectionHintStyle}"/>
                                     <Border Style="{StaticResource SectionDividerStyle}"/>
@@ -1469,7 +1464,6 @@
 
                             <Border Style="{StaticResource SectionCardStyle}">
                                 <StackPanel>
-                                    <TextBlock Text="历史数据迁移" Style="{StaticResource SectionTitleStyle}"/>
                                     <TextBlock Text="把旧版本录像转换成更容易播放的格式。"
                                                Style="{StaticResource SectionHintStyle}"/>
                                     <Border Style="{StaticResource SectionDividerStyle}"/>
@@ -1519,7 +1513,6 @@
                         <StackPanel>
                             <Border Style="{StaticResource SectionCardStyle}">
                                 <StackPanel>
-                                    <TextBlock Text="语音播报" Style="{StaticResource SectionTitleStyle}"/>
                                     <TextBlock Text="设置订单提醒时使用什么声音。"
                                                Style="{StaticResource SectionHintStyle}"/>
                                     <Border Style="{StaticResource SectionDividerStyle}"/>
@@ -1592,7 +1585,6 @@
                             <Border Style="{StaticResource SectionCardStyle}"
                                     IsEnabled="{Binding IsChecked, ElementName=AiTtsCheckBox, TargetNullValue=False}">
                                 <StackPanel>
-                                    <TextBlock Text="播报声音" Style="{StaticResource SectionTitleStyle}"/>
                                     <TextBlock Text="给正常提示和警告提示选择不同声音。"
                                                Style="{StaticResource SectionHintStyle}"/>
                                     <Border Style="{StaticResource SectionDividerStyle}"/>
@@ -1723,7 +1715,6 @@
                             <Border Style="{StaticResource SectionCardStyle}"
                                     IsEnabled="{Binding IsChecked, ElementName=AiTtsCheckBox, TargetNullValue=False}">
                                 <StackPanel>
-                                    <TextBlock Text="试听与断句" Style="{StaticResource SectionTitleStyle}"/>
                                     <TextBlock Text="先试听播报效果，再按商品名调整停顿。"
                                                Style="{StaticResource SectionHintStyle}"/>
                                     <Border Style="{StaticResource SectionDividerStyle}"/>
@@ -1843,33 +1834,11 @@
                                                             Increment="256"/>
                                     </Grid>
 
-                                    <Border Style="{StaticResource SectionDividerStyle}"/>
-
-                                    <Grid Style="{StaticResource SettingRowStyle}" Margin="0">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*"/>
-                                            <ColumnDefinition Width="24"/>
-                                            <ColumnDefinition Width="260"/>
-                                        </Grid.ColumnDefinitions>
-                                        <StackPanel Margin="0,0,16,0">
-                                            <TextBlock Text="安装联动助手" Style="{StaticResource FieldLabelStyle}"/>
-                                            <TextBlock Text="让快递助手页面把订单信息发送到监控工位。"
-                                                       Style="{StaticResource FieldHintStyle}"/>
-                                        </StackPanel>
-                                        <Button Grid.Column="2"
-                                                Content="安装联动助手"
-                                                Click="InstallTool_Click"
-                                                Style="{StaticResource SecondaryActionButtonStyle}"
-                                                Height="32"
-                                                Padding="12,0"
-                                                HorizontalAlignment="Left"/>
-                                    </Grid>
                                 </StackPanel>
                             </Border>
 
                             <Border Style="{StaticResource SectionCardStyle}">
                                 <StackPanel>
-                                    <TextBlock Text="订单信息播报" Style="{StaticResource SectionTitleStyle}"/>
                                     <TextBlock Text="扫码打包时，自动播报订单备注、留言和商品信息。"
                                                Style="{StaticResource SectionHintStyle}"/>
                                     <Border Style="{StaticResource SectionDividerStyle}"/>
@@ -1890,6 +1859,26 @@
                                                   VerticalAlignment="Center"
                                                   HorizontalAlignment="Left"
                                                   Style="{StaticResource ToggleSwitchStyle}"/>
+                                    </Grid>
+
+                                    <Grid Style="{StaticResource SettingRowStyle}" Margin="0,0,0,14">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="24"/>
+                                            <ColumnDefinition Width="260"/>
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Margin="0,0,16,0">
+                                            <TextBlock Text="安装联动助手" Style="{StaticResource FieldLabelStyle}"/>
+                                            <TextBlock Text="让快递助手页面把订单信息发送到监控工位。"
+                                                       Style="{StaticResource FieldHintStyle}"/>
+                                        </StackPanel>
+                                        <Button Grid.Column="2"
+                                                Content="安装联动助手"
+                                                Click="InstallTool_Click"
+                                                Style="{StaticResource SecondaryActionButtonStyle}"
+                                                Height="32"
+                                                Padding="12,0"
+                                                HorizontalAlignment="Left"/>
                                     </Grid>
 
                                     <Grid Style="{StaticResource SettingRowStyle}" Margin="24,8,0,0"
@@ -1968,7 +1957,6 @@
                             <!-- 水印设置 -->
                             <Border Style="{StaticResource SectionCardStyle}">
                                 <StackPanel>
-                                    <TextBlock Text="视频水印" Style="{StaticResource SectionTitleStyle}"/>
                                     <TextBlock Text="把单号和时间显示在录像画面上。"
                                                Style="{StaticResource SectionHintStyle}"/>
                                     <Border Style="{StaticResource SectionDividerStyle}"/>
@@ -1995,7 +1983,6 @@
 
                             <Border Style="{StaticResource SectionCardStyle}">
                                 <StackPanel>
-                                    <TextBlock Text="扫码与启动" Style="{StaticResource SectionTitleStyle}"/>
                                     <TextBlock Text="设置扫码枪输入、单号判断和开机启动。"
                                                Style="{StaticResource SectionHintStyle}"/>
                                     <Border Style="{StaticResource SectionDividerStyle}"/>
@@ -2078,7 +2065,6 @@
 
                             <Border Style="{StaticResource SectionCardStyle}">
                                 <StackPanel>
-                                    <TextBlock Text="维护工具" Style="{StaticResource SectionTitleStyle}"/>
                                     <TextBlock Text="排查录像或硬件问题时再使用。"
                                                Style="{StaticResource SectionHintStyle}"/>
                                     <Border Style="{StaticResource SectionDividerStyle}"/>
@@ -2114,7 +2100,6 @@
                         <StackPanel>
                             <Border Style="{StaticResource SectionCardStyle}">
                                 <StackPanel>
-                                    <TextBlock Text="关于与开源许可" Style="{StaticResource SectionTitleStyle}"/>
                                     <TextBlock Text="查看项目源码、许可证和开源使用说明。"
                                                Style="{StaticResource SectionHintStyle}"/>
                                     <Border Style="{StaticResource SectionDividerStyle}"/>
