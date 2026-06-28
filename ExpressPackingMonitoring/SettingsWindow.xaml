@@ -1118,46 +1118,9 @@
                         <StackPanel>
                             <Border Style="{StaticResource SectionCardStyle}">
                                 <StackPanel>
-                                    <TextBlock Text="控制提醒声音，以及录像什么时候自动结束。"
+                                    <TextBlock Text="设置录像什么时候自动结束，以及空闲时是否关闭摄像头。"
                                                Style="{StaticResource SectionHintStyle}"/>
                                     <Border Style="{StaticResource SectionDividerStyle}"/>
-
-                                    <Grid Style="{StaticResource SettingRowStyle}">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*"/>
-                                            <ColumnDefinition Width="24"/>
-                                            <ColumnDefinition Width="260"/>
-                                        </Grid.ColumnDefinitions>
-                                        <StackPanel Margin="0,0,16,0">
-                                            <TextBlock Text="启用声音提示" Style="{StaticResource FieldLabelStyle}"/>
-                                            <TextBlock Text="超时或关键事件发生时播放提醒音。"
-                                                       Style="{StaticResource FieldHintStyle}"/>
-                                        </StackPanel>
-                                        <CheckBox Grid.Column="2"
-                                                  IsChecked="{Binding Config.EnableSoundPrompt}"
-                                                  VerticalAlignment="Center"
-                                                  HorizontalAlignment="Left"
-                                                  Style="{StaticResource ToggleSwitchStyle}"/>
-                                    </Grid>
-
-                                    <Grid Style="{StaticResource SettingRowStyle}" Margin="0,0,0,14">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*"/>
-                                            <ColumnDefinition Width="24"/>
-                                            <ColumnDefinition Width="260"/>
-                                        </Grid.ColumnDefinitions>
-                                        <StackPanel Margin="0,0,16,0">
-                                            <TextBlock Text="超时预警提前 / 秒" Style="{StaticResource FieldLabelStyle}"/>
-                                            <TextBlock Text="在超时前提前提醒，给操作员留出处理时间。"
-                                                       Style="{StaticResource FieldHintStyle}"/>
-                                        </StackPanel>
-                                        <xctk:DoubleUpDown Grid.Column="2"
-                                                           Height="36"
-                                                           Value="{Binding Config.TimeoutWarningSeconds}"
-                                                           Minimum="3"
-                                                           Maximum="120"
-                                                           Increment="1"/>
-                                    </Grid>
 
                                     <Grid Style="{StaticResource SettingRowStyle}" Margin="0,0,0,14">
                                         <Grid.ColumnDefinitions>
@@ -1197,6 +1160,25 @@
                                                            Minimum="0.1"
                                                            Maximum="60.0"
                                                            Increment="0.5"/>
+                                    </Grid>
+
+                                    <Grid Style="{StaticResource SettingRowStyle}" Margin="0,0,0,14">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="24"/>
+                                            <ColumnDefinition Width="260"/>
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Margin="0,0,16,0">
+                                            <TextBlock Text="提前提醒时间 / 秒" Style="{StaticResource FieldLabelStyle}"/>
+                                            <TextBlock Text="快要自动停止录像前，提前多久提醒。"
+                                                       Style="{StaticResource FieldHintStyle}"/>
+                                        </StackPanel>
+                                        <xctk:DoubleUpDown Grid.Column="2"
+                                                           Height="36"
+                                                           Value="{Binding Config.TimeoutWarningSeconds}"
+                                                           Minimum="3"
+                                                           Maximum="120"
+                                                           Increment="1"/>
                                     </Grid>
 
                                     <Grid Style="{StaticResource SettingRowStyle}" Margin="0,0,0,14">
@@ -1513,7 +1495,7 @@
                         <StackPanel>
                             <Border Style="{StaticResource SectionCardStyle}">
                                 <StackPanel>
-                                    <TextBlock Text="设置订单提醒时使用什么声音。"
+                                    <TextBlock Text="设置提醒声音、订单播报和语音效果。"
                                                Style="{StaticResource SectionHintStyle}"/>
                                     <Border Style="{StaticResource SectionDividerStyle}"/>
 
@@ -1524,21 +1506,21 @@
                                             <ColumnDefinition Width="260"/>
                                         </Grid.ColumnDefinitions>
                                         <StackPanel Margin="0,0,16,0">
-                                            <TextBlock Text="启用 AI 语音" Style="{StaticResource FieldLabelStyle}"/>
-                                            <TextBlock Text="开启后播报声音更自然，关闭后使用系统默认语音。"
+                                            <TextBlock Text="语音提醒" Style="{StaticResource FieldLabelStyle}"/>
+                                            <TextBlock Text="开启后，超时、停录和订单信息会用语音提醒。"
                                                        Style="{StaticResource FieldHintStyle}"/>
                                         </StackPanel>
-                                        <CheckBox x:Name="AiTtsCheckBox"
+                                        <CheckBox x:Name="SoundPromptCheckBox"
                                                   Grid.Column="2"
-                                                  IsChecked="{Binding Config.EnableAiTts}"
+                                                  IsChecked="{Binding Config.EnableSoundPrompt}"
                                                   VerticalAlignment="Center"
                                                   HorizontalAlignment="Left"
                                                   Style="{StaticResource ToggleSwitchStyle}"/>
                                     </Grid>
 
                                     <Grid Style="{StaticResource SettingRowStyle}"
-                                          ToolTip="Edge TTS 使用微软在线语音，声音自然；Kokoro 是本地模型，需要额外运行依赖。"
-                                          IsEnabled="{Binding IsChecked, ElementName=AiTtsCheckBox, TargetNullValue=False}">
+                                          ToolTip="系统语音不需要网络；联网语音声音更自然；离线语音使用本地模型，需要额外运行依赖。"
+                                          IsEnabled="{Binding IsChecked, ElementName=SoundPromptCheckBox, TargetNullValue=False}">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*"/>
                                             <ColumnDefinition Width="24"/>
@@ -1546,22 +1528,44 @@
                                         </Grid.ColumnDefinitions>
                                         <StackPanel Margin="0,0,16,0">
                                             <TextBlock Text="语音引擎" Style="{StaticResource FieldLabelStyle}"/>
-                                            <TextBlock Text="选择语音播报使用的声音来源。"
+                                            <TextBlock Text="选择提醒声音使用系统语音、联网语音还是离线语音。"
                                                        Style="{StaticResource FieldHintStyle}"/>
                                         </StackPanel>
-                                        <ComboBox x:Name="AiTtsEngineComboBox"
+                                        <ComboBox x:Name="VoiceEngineComboBox"
                                                   Grid.Column="2"
                                                   Width="220"
                                                   HorizontalAlignment="Left"
-                                                  SelectedValue="{Binding Config.AiTtsEngine}"
-                                                  SelectedValuePath="Tag">
-                                            <ComboBoxItem Content="联网生成语音" Tag="Edge"/>
-                                            <ComboBoxItem Content="离线生成语音" Tag="Kokoro"/>
+                                                  SelectedValuePath="Tag"
+                                                  SelectionChanged="VoiceEngineComboBox_SelectionChanged">
+                                            <ComboBoxItem Content="系统语音" Tag="System"/>
+                                            <ComboBoxItem Content="联网语音" Tag="Edge"/>
+                                            <ComboBoxItem Content="离线语音" Tag="Kokoro"/>
                                         </ComboBox>
                                     </Grid>
 
-                                    <Grid Style="{StaticResource SettingRowStyle}" Margin="0"
-                                          IsEnabled="{Binding IsChecked, ElementName=AiTtsCheckBox, TargetNullValue=False}">
+                                    <Grid Margin="0">
+                                        <Grid.Style>
+                                            <Style TargetType="Grid" BasedOn="{StaticResource SettingRowStyle}">
+                                                <Setter Property="IsEnabled" Value="False"/>
+                                                <Setter Property="Margin" Value="0"/>
+                                                <Style.Triggers>
+                                                    <MultiDataTrigger>
+                                                        <MultiDataTrigger.Conditions>
+                                                            <Condition Binding="{Binding IsChecked, ElementName=SoundPromptCheckBox}" Value="True"/>
+                                                            <Condition Binding="{Binding SelectedValue, ElementName=VoiceEngineComboBox}" Value="Edge"/>
+                                                        </MultiDataTrigger.Conditions>
+                                                        <Setter Property="IsEnabled" Value="True"/>
+                                                    </MultiDataTrigger>
+                                                    <MultiDataTrigger>
+                                                        <MultiDataTrigger.Conditions>
+                                                            <Condition Binding="{Binding IsChecked, ElementName=SoundPromptCheckBox}" Value="True"/>
+                                                            <Condition Binding="{Binding SelectedValue, ElementName=VoiceEngineComboBox}" Value="Kokoro"/>
+                                                        </MultiDataTrigger.Conditions>
+                                                        <Setter Property="IsEnabled" Value="True"/>
+                                                    </MultiDataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </Grid.Style>
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*"/>
                                             <ColumnDefinition Width="24"/>
@@ -1582,8 +1586,28 @@
                                 </StackPanel>
                             </Border>
 
-                            <Border Style="{StaticResource SectionCardStyle}"
-                                    IsEnabled="{Binding IsChecked, ElementName=AiTtsCheckBox, TargetNullValue=False}">
+                            <Border>
+                                <Border.Style>
+                                    <Style TargetType="Border" BasedOn="{StaticResource SectionCardStyle}">
+                                        <Setter Property="IsEnabled" Value="False"/>
+                                        <Style.Triggers>
+                                            <MultiDataTrigger>
+                                                <MultiDataTrigger.Conditions>
+                                                    <Condition Binding="{Binding IsChecked, ElementName=SoundPromptCheckBox}" Value="True"/>
+                                                    <Condition Binding="{Binding SelectedValue, ElementName=VoiceEngineComboBox}" Value="Edge"/>
+                                                </MultiDataTrigger.Conditions>
+                                                <Setter Property="IsEnabled" Value="True"/>
+                                            </MultiDataTrigger>
+                                            <MultiDataTrigger>
+                                                <MultiDataTrigger.Conditions>
+                                                    <Condition Binding="{Binding IsChecked, ElementName=SoundPromptCheckBox}" Value="True"/>
+                                                    <Condition Binding="{Binding SelectedValue, ElementName=VoiceEngineComboBox}" Value="Kokoro"/>
+                                                </MultiDataTrigger.Conditions>
+                                                <Setter Property="IsEnabled" Value="True"/>
+                                            </MultiDataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Border.Style>
                                 <StackPanel>
                                     <TextBlock Text="给正常提示和警告提示选择不同声音。"
                                                Style="{StaticResource SectionHintStyle}"/>
@@ -1594,7 +1618,7 @@
                                             <Style TargetType="Grid" BasedOn="{StaticResource SettingRowStyle}">
                                                 <Setter Property="IsEnabled" Value="False"/>
                                                 <Style.Triggers>
-                                                    <DataTrigger Binding="{Binding SelectedValue, ElementName=AiTtsEngineComboBox}" Value="Kokoro">
+                                                    <DataTrigger Binding="{Binding SelectedValue, ElementName=VoiceEngineComboBox}" Value="Kokoro">
                                                         <Setter Property="IsEnabled" Value="True"/>
                                                     </DataTrigger>
                                                 </Style.Triggers>
@@ -1623,7 +1647,7 @@
                                             <Style TargetType="Grid" BasedOn="{StaticResource SettingRowStyle}">
                                                 <Setter Property="IsEnabled" Value="False"/>
                                                 <Style.Triggers>
-                                                    <DataTrigger Binding="{Binding SelectedValue, ElementName=AiTtsEngineComboBox}" Value="Kokoro">
+                                                    <DataTrigger Binding="{Binding SelectedValue, ElementName=VoiceEngineComboBox}" Value="Kokoro">
                                                         <Setter Property="IsEnabled" Value="True"/>
                                                     </DataTrigger>
                                                 </Style.Triggers>
@@ -1652,7 +1676,7 @@
                                             <Style TargetType="Grid" BasedOn="{StaticResource SettingRowStyle}">
                                                 <Setter Property="IsEnabled" Value="False"/>
                                                 <Style.Triggers>
-                                                    <DataTrigger Binding="{Binding SelectedValue, ElementName=AiTtsEngineComboBox}" Value="Edge">
+                                                    <DataTrigger Binding="{Binding SelectedValue, ElementName=VoiceEngineComboBox}" Value="Edge">
                                                         <Setter Property="IsEnabled" Value="True"/>
                                                     </DataTrigger>
                                                 </Style.Triggers>
@@ -1684,7 +1708,7 @@
                                                 <Setter Property="IsEnabled" Value="False"/>
                                                 <Setter Property="Margin" Value="0"/>
                                                 <Style.Triggers>
-                                                    <DataTrigger Binding="{Binding SelectedValue, ElementName=AiTtsEngineComboBox}" Value="Edge">
+                                                    <DataTrigger Binding="{Binding SelectedValue, ElementName=VoiceEngineComboBox}" Value="Edge">
                                                         <Setter Property="IsEnabled" Value="True"/>
                                                     </DataTrigger>
                                                 </Style.Triggers>
@@ -1712,8 +1736,28 @@
                                 </StackPanel>
                             </Border>
 
-                            <Border Style="{StaticResource SectionCardStyle}"
-                                    IsEnabled="{Binding IsChecked, ElementName=AiTtsCheckBox, TargetNullValue=False}">
+                            <Border>
+                                <Border.Style>
+                                    <Style TargetType="Border" BasedOn="{StaticResource SectionCardStyle}">
+                                        <Setter Property="IsEnabled" Value="False"/>
+                                        <Style.Triggers>
+                                            <MultiDataTrigger>
+                                                <MultiDataTrigger.Conditions>
+                                                    <Condition Binding="{Binding IsChecked, ElementName=SoundPromptCheckBox}" Value="True"/>
+                                                    <Condition Binding="{Binding SelectedValue, ElementName=VoiceEngineComboBox}" Value="Edge"/>
+                                                </MultiDataTrigger.Conditions>
+                                                <Setter Property="IsEnabled" Value="True"/>
+                                            </MultiDataTrigger>
+                                            <MultiDataTrigger>
+                                                <MultiDataTrigger.Conditions>
+                                                    <Condition Binding="{Binding IsChecked, ElementName=SoundPromptCheckBox}" Value="True"/>
+                                                    <Condition Binding="{Binding SelectedValue, ElementName=VoiceEngineComboBox}" Value="Kokoro"/>
+                                                </MultiDataTrigger.Conditions>
+                                                <Setter Property="IsEnabled" Value="True"/>
+                                            </MultiDataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Border.Style>
                                 <StackPanel>
                                     <TextBlock Text="先试听播报效果，再按商品名调整停顿。"
                                                Style="{StaticResource SectionHintStyle}"/>

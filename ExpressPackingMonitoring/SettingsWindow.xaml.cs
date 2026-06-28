@@ -52,6 +52,7 @@ namespace ExpressPackingMonitoring
         private string _originalTheme;
         private bool _isRecording;
         private bool _isLoadingDevices;
+        private bool _isSyncingVoiceEngine;
 
         public SettingsWindow(MainViewModel mainVM, AppConfig clonedConfig, double diskUsagePercent, string diskUsageText, bool isRecording = false)
         {
@@ -65,6 +66,7 @@ namespace ExpressPackingMonitoring
             CurrentDiskUsageText = diskUsageText;
 
             this.DataContext = this;
+            SyncVoiceEngineComboBoxFromConfig();
 
             // GPU编码器使用缓存，可立即加载
             LoadGpuEncoders();
@@ -581,6 +583,37 @@ namespace ExpressPackingMonitoring
             {
                 MainVM.PreviewZoomScale = scale;
             }
+        }
+
+        private void SyncVoiceEngineComboBoxFromConfig()
+        {
+            if (VoiceEngineComboBox == null) return;
+
+            _isSyncingVoiceEngine = true;
+            VoiceEngineComboBox.SelectedValue = Config.EnableAiTts
+                ? NormalizeVoiceEngine(Config.AiTtsEngine)
+                : "System";
+            _isSyncingVoiceEngine = false;
+        }
+
+        private void VoiceEngineComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (_isSyncingVoiceEngine || Config == null) return;
+
+            string engine = VoiceEngineComboBox.SelectedValue?.ToString() ?? "System";
+            if (string.Equals(engine, "System", StringComparison.OrdinalIgnoreCase))
+            {
+                Config.EnableAiTts = false;
+                return;
+            }
+
+            Config.EnableAiTts = true;
+            Config.AiTtsEngine = NormalizeVoiceEngine(engine);
+        }
+
+        private static string NormalizeVoiceEngine(string engine)
+        {
+            return string.Equals(engine, "Kokoro", StringComparison.OrdinalIgnoreCase) ? "Kokoro" : "Edge";
         }
 
         private void InstallTool_Click(object sender, RoutedEventArgs e)
