@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         订单备注播报插件
 // @namespace    https://github.com/ExpressPackingMonitoring
-// @version      1.1
-// @description  从快递助手批量打印页面提取买家留言和卖家备注，发送到监控工位，打包时自动播报。
+// @version      1.2
+// @description  从快递助手批量打印页面提取买家留言和卖家备注，发送到监控工位，打包时自动播报。v1.2 增加测试订单发送功能。
 // @author       ExpressPackingMonitoring
 // @match        *://p4.kuaidizs.cn/*
 // @match        *://kuaidizs.cn/*
@@ -26,6 +26,7 @@
     const DISCOVERY_DONE_KEY = 'monitor_auto_discovery_done';
     const DISCOVERY_TIMEOUT = 700;
     const DISCOVERY_BATCH_SIZE = 32;
+    const CHANGELOG = 'v1.2：增加测试订单发送功能，用于确认快递助手订单备注能否成功发送到监控工位';
 
     function getHost() { return GM_getValue('monitor_host', DEFAULT_HOST); }
     function getPort() { return GM_getValue('monitor_port', DEFAULT_PORT); }
@@ -189,6 +190,9 @@
         const found = await findMonitorAddress(true);
         showNotification(found ? `已自动填入：${found}` : '未找到上位机，请确认已开启 Web 服务并在同一局域网');
     });
+    GM_registerMenuCommand('发送测试订单', () => {
+        sendTestOrder();
+    });
     GM_registerMenuCommand('🔄 立即推送订单数据', () => {
         extractAndPush();
     });
@@ -287,34 +291,72 @@
     }
 
     // ============ 推送到上位机 ============
-    async function pushToMonitor(orders) {
-        if (!orders || orders.length === 0) return;
+    function parseJsonResponse(text) {
+        try { return JSON.parse(text || '{}'); } catch (e) { return {}; }
+    }
+
+    async function pushToMonitor(orders, options) {
+        options = options || {};
+        if (!orders || orders.length === 0) return { ok: false, confirmed: false, error: 'empty' };
         await ensureMonitorAddress(false);
 
-        GM_xmlhttpRequest({
-            method: 'POST',
-            url: getApiUrl(),
-            headers: { 'Content-Type': 'application/json' },
-            data: JSON.stringify(orders),
-            timeout: 5000,
-            onload: function (res) {
-                if (res.status === 200) {
-                    console.log(`[打包监控] 推送成功: ${orders.length} 条`);
-                    showNotification(`✅ 已推送 ${orders.length} 条订单到打包监控`);
-                } else {
+        return new Promise(resolve => {
+            GM_xmlhttpRequest({
+                method: 'POST',
+                url: getApiUrl(),
+                headers: { 'Content-Type': 'application/json' },
+                data: JSON.stringify(orders),
+                timeout: 5000,
+                onload: function (res) {
+                    const response = parseJsonResponse(res.responseText);
+                    if (res.status === 200) {
+                        console.log(`[打包监控] 推送成功: ${orders.length} 条`, response);
+                        const confirmed = !options.isTest || Number(response.testCount || 0) > 0;
+                        if (options.isTest) {
+                            showNotification(confirmed ? '监控工位已收到测试订单' : '测试订单已发送，请查看监控端是否播报');
+                        } else {
+                            showNotification(`✅ 已推送 ${orders.length} 条订单到打包监控`);
+                        }
+                        resolve({ ok: true, confirmed, response });
+                        return;
+                    }
+
                     console.warn('[打包监控] 推送失败:', res.status, res.responseText);
-                    showNotification(`❌ 推送失败: ${res.status}`);
+                    showNotification(options.isTest ? '测试发送失败，请检查监控工位地址' : `❌ 推送失败: ${res.status}`);
+                    resolve({ ok: false, confirmed: false, status: res.status, response });
+                },
+                onerror: function (err) {
+                    console.warn('[打包监控] 连接失败，请确认上位机已启动 Web 服务:', err);
+                    showNotification(options.isTest ? '测试发送失败，请检查监控工位地址' : '⚠️ 无法连接上位机，请检查 IP/端口设置');
+                    resolve({ ok: false, confirmed: false, error: 'connect' });
+                },
+                ontimeout: function () {
+                    console.warn('[打包监控] 推送超时');
+                    showNotification(options.isTest ? '测试发送超时，请检查监控工位地址' : '⏱ 推送超时，请检查网络');
+                    resolve({ ok: false, confirmed: false, error: 'timeout' });
                 }
-            },
-            onerror: function (err) {
-                console.warn('[打包监控] 连接失败，请确认上位机已启动 Web 服务:', err);
-                showNotification('⚠️ 无法连接上位机，请检查 IP/端口设置');
-            },
-            ontimeout: function () {
-                console.warn('[打包监控] 推送超时');
-                showNotification('⏱ 推送超时，请检查网络');
-            }
+            });
         });
+    }
+
+    function buildTestOrder() {
+        const now = new Date();
+        const hhmmss = [now.getHours(), now.getMinutes(), now.getSeconds()]
+            .map(v => String(v).padStart(2, '0'))
+            .join('');
+        return [{
+            trackingNumber: `TEST${hhmmss}`,
+            orderId: '测试订单',
+            buyerMessage: '这是一条测试买家留言',
+            sellerMemo: '这是一条测试卖家备注',
+            productInfo: '测试商品',
+            isTest: true
+        }];
+    }
+
+    async function sendTestOrder() {
+        showNotification('正在发送测试订单，用于确认监控工位能否收到订单备注');
+        await pushToMonitor(buildTestOrder(), { isTest: true });
     }
 
     async function extractAndPush() {
@@ -408,5 +450,5 @@
         extractAndPush();
     }, 3000);
 
-    console.log('[打包监控] 油猴脚本已加载');
+    console.log('[打包监控] 油猴脚本已加载', CHANGELOG);
 })();

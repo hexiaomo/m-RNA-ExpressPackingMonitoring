@@ -94,20 +94,28 @@ public static class WorkstationNetwork
         }
     }
 
-    public static async Task<bool> SendTestOrderAsync(string address)
+    public sealed class TestOrderSendResult
+    {
+        public bool Sent { get; init; }
+        public bool MonitorConfirmed { get; init; }
+        public string ErrorMessage { get; init; } = "";
+    }
+
+    public static async Task<TestOrderSendResult> SendTestOrderAsync(string address)
     {
         address = NormalizeAddress(address);
-        if (string.IsNullOrWhiteSpace(address)) return false;
+        if (string.IsNullOrWhiteSpace(address))
+            return new TestOrderSendResult { ErrorMessage = "监控工位地址为空" };
 
         var order = new[]
         {
             new
             {
                 trackingNumber = $"TEST{DateTime.Now:HHmmss}",
-                orderId = "工位连接测试",
-                buyerMessage = "这是一条连接测试",
-                sellerMemo = "",
-                productInfo = "测试订单",
+                orderId = "测试订单",
+                buyerMessage = "这是一条测试买家留言",
+                sellerMemo = "这是一条测试卖家备注",
+                productInfo = "测试商品",
                 isTest = true
             }
         };
@@ -116,11 +124,28 @@ public static class WorkstationNetwork
         {
             using var content = new StringContent(JsonSerializer.Serialize(order), Encoding.UTF8, "application/json");
             using var response = await Client.PostAsync($"{ToUrl(address)}/api/orderinfo", content);
-            return response.IsSuccessStatusCode;
+            if (!response.IsSuccessStatusCode)
+                return new TestOrderSendResult { ErrorMessage = $"HTTP {(int)response.StatusCode}" };
+
+            string body = await response.Content.ReadAsStringAsync();
+            bool confirmed = false;
+            try
+            {
+                using var doc = JsonDocument.Parse(body);
+                confirmed = doc.RootElement.TryGetProperty("testCount", out var testCount)
+                    && testCount.TryGetInt32(out int value)
+                    && value > 0;
+            }
+            catch
+            {
+                confirmed = false;
+            }
+
+            return new TestOrderSendResult { Sent = true, MonitorConfirmed = confirmed };
         }
-        catch
+        catch (Exception ex)
         {
-            return false;
+            return new TestOrderSendResult { ErrorMessage = ex.Message };
         }
     }
 

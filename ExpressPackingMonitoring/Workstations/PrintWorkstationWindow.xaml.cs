@@ -156,10 +156,21 @@ public partial class PrintWorkstationWindow : Window
     {
         string address = WorkstationNetwork.NormalizeAddress(AddressTextBox.Text);
         SetStatus("正在测试发送订单...", address);
-        bool ok = await WorkstationNetwork.SendTestOrderAsync(address);
-        SetStatus(ok ? "监控端已收到" : "发送失败，请检查地址",
-            ok ? "测试订单已发送，监控端会播报“收到测试订单”。" : "请确认监控端地址正确，并且两台电脑在同一局域网。",
-            ok ? StatusVisual.Success : StatusVisual.Error);
+        var result = await WorkstationNetwork.SendTestOrderAsync(address);
+        if (result.MonitorConfirmed)
+        {
+            SetStatus("监控端已收到测试订单", "测试订单已发送，监控端会播报“收到测试订单”。", StatusVisual.Success);
+        }
+        else if (result.Sent)
+        {
+            SetStatus("测试订单已发送", "接口已返回成功，请在监控端确认是否播报。", StatusVisual.Success);
+        }
+        else
+        {
+            SetStatus("测试发送失败，请检查监控工位地址",
+                "请确认监控端地址正确，并且两台电脑在同一局域网。",
+                StatusVisual.Error);
+        }
     }
 
     private void SwitchWorkstation_Click(object sender, RoutedEventArgs e)
