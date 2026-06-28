@@ -82,6 +82,7 @@ namespace ExpressPackingMonitoring.ViewModels
         public bool EnableMaxDuration { get; set; } = false;
         public double MaxDurationMinutes { get; set; } = 5.0;
         public double MinRecordingSeconds { get; set; } = 3.0;
+        public int MinVideoFileSizeKB { get; set; } = 50;
         public bool EnableCameraIdle { get; set; } = true;
         public double CameraIdleMinutes { get; set; } = 30.0;
 

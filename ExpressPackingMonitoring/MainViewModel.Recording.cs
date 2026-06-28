@@ -114,20 +114,36 @@ namespace ExpressPackingMonitoring.ViewModels
                 if (_isDisposed) return; // 销毁中不再执行数据库后的 UI 更新
                 try
                 {
-                    long fileSize = File.Exists(filePath) ? new FileInfo(filePath).Length : 0;
+                    long fileSize = GetCompletedRecordingSizeBytes(filePath, audioFilePath);
                     double recordDuration = (DateTime.Now - recordStart).TotalSeconds;
+                    int durSec = Math.Max(1, (int)recordDuration);
 
-                    // 如果文件小于 50KB (比如启动报错或没数据)，或录制时长不足最低时长要求，作为无效数据丢弃
+                    // 文件过小和录制过短是两条独立规则，原因要分别写入数据库。
+                    long minFileSizeBytes = GetMinVideoFileSizeBytes();
+                    bool tooSmall = minFileSizeBytes > 0 && fileSize < minFileSizeBytes;
                     bool tooShort = Config.MinRecordingSeconds > 0 && recordDuration < Config.MinRecordingSeconds;
-                    if (fileSize < 1024 * 50 || tooShort)
+                    if (tooSmall || tooShort)
                     {
-                        try { if (File.Exists(filePath)) File.Delete(filePath); } catch { }
+                        string deleteReason = tooSmall
+                            ? $"文件过小，小于 {FormatMinVideoFileSize(Config.MinVideoFileSizeKB)}"
+                            : $"录像过短，少于 {FormatSecondsForReason(Config.MinRecordingSeconds)}";
+                        _db?.UpdateVideoRecordOnStop(recordId, DateTime.Now, durSec, fileSize, deleteReason, videoCodec, videoEncoder);
+
+                        bool videoDeleted = DeleteVideoFileForRule(filePath, deleteReason);
                         DeleteAudioTempFile(audioFilePath);
+                        if (videoDeleted && !string.IsNullOrWhiteSpace(filePath))
+                            _db?.MarkVideoDeleted(filePath, deleteReason);
+
                         _ = Application.Current.Dispatcher.InvokeAsync(() => {
                             if (!_isDisposed) {
                                 _allLogs.Remove(scanRecord);
                                 FilteredLogs.Remove(scanRecord);
-                                if (tooShort && fileSize >= 1024 * 50)
+                                if (tooSmall)
+                                {
+                                    ShowToast("警告：视频文件太小，已删除");
+                                    SpeakWarning("视频文件太小，已删除");
+                                }
+                                else if (tooShort)
                                 {
                                     ShowToast($"警告：录像过短({recordDuration:F1}s)，已丢弃");
                                     SpeakWarning("录像过短，已丢弃");
@@ -138,7 +154,7 @@ namespace ExpressPackingMonitoring.ViewModels
                     else
                     {
                         double dur = (DateTime.Now - recordStart).TotalSeconds;
-                        int durSec = (int)dur;
+                        durSec = (int)dur;
                         if (durSec < 1) durSec = 1;
                         string durStr = durSec < 60 ? $"{durSec}s" : $"{(int)durSec / 60}m {durSec % 60}s";
 
@@ -374,6 +390,66 @@ namespace ExpressPackingMonitoring.ViewModels
 
             public static StorageLocationEvaluation Skip(string path, string reason) =>
                 new(false, path, reason, 0, 0, 0, 0, 0);
+        }
+
+        private long GetCompletedRecordingSizeBytes(string? videoFilePath, string? audioFilePath)
+        {
+            long totalBytes = 0;
+            totalBytes += GetExistingFileSize(videoFilePath);
+            totalBytes += GetExistingFileSize(audioFilePath);
+            return totalBytes;
+        }
+
+        private static long GetExistingFileSize(string? filePath)
+        {
+            if (string.IsNullOrWhiteSpace(filePath) || !File.Exists(filePath))
+                return 0;
+
+            try
+            {
+                return new FileInfo(filePath).Length;
+            }
+            catch
+            {
+                return 0;
+            }
+        }
+
+        private long GetMinVideoFileSizeBytes()
+        {
+            if (Config.MinVideoFileSizeKB <= 0)
+                return 0;
+
+            return (long)Config.MinVideoFileSizeKB * 1024L;
+        }
+
+        private static string FormatMinVideoFileSize(int sizeKb)
+        {
+            return $"{Math.Max(0, sizeKb)} KB";
+        }
+
+        private static string FormatSecondsForReason(double seconds)
+        {
+            return seconds % 1 == 0 ? $"{seconds:F0} 秒" : $"{seconds:F1} 秒";
+        }
+
+        private static bool DeleteVideoFileForRule(string? filePath, string reason)
+        {
+            if (string.IsNullOrWhiteSpace(filePath))
+                return false;
+
+            try
+            {
+                if (File.Exists(filePath))
+                    File.Delete(filePath);
+
+                return !File.Exists(filePath);
+            }
+            catch (Exception ex)
+            {
+                RuntimeLog.Error("Recording", $"Failed to delete video file by rule, reason={reason}, file={Path.GetFileName(filePath)}", ex);
+                return false;
+            }
         }
 
         private bool IsDirectoryWritable(string dirPath)

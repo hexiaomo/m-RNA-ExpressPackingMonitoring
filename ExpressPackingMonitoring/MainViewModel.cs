@@ -2122,8 +2122,10 @@ namespace ExpressPackingMonitoring.ViewModels
             {
                 try
                 {
-                    long fileSize = new FileInfo(videoFileToConvert).Length;
-                    if (fileSize >= 1024 * 50 && recordId > 0)
+                    long fileSize = GetCompletedRecordingSizeBytes(videoFileToConvert, audioFileToConvert);
+                    long minFileSizeBytes = GetMinVideoFileSizeBytes();
+                    bool tooSmall = minFileSizeBytes > 0 && fileSize < minFileSizeBytes;
+                    if (!tooSmall && recordId > 0)
                     {
                         int durSec = Math.Max(1, (int)(DateTime.Now - recordStart).TotalSeconds);
                         _db?.UpdateVideoRecordOnStop(recordId, DateTime.Now, durSec, fileSize, _stopReason, _currentVideoCodec, _currentVideoEncoder);
@@ -2131,6 +2133,14 @@ namespace ExpressPackingMonitoring.ViewModels
                     }
                     else
                     {
+                        if (tooSmall && recordId > 0)
+                        {
+                            string deleteReason = $"文件过小，小于 {FormatMinVideoFileSize(Config.MinVideoFileSizeKB)}";
+                            int durSec = Math.Max(1, (int)(DateTime.Now - recordStart).TotalSeconds);
+                            _db?.UpdateVideoRecordOnStop(recordId, DateTime.Now, durSec, fileSize, deleteReason, _currentVideoCodec, _currentVideoEncoder);
+                            if (DeleteVideoFileForRule(videoFileToConvert, deleteReason))
+                                _db?.MarkVideoDeleted(videoFileToConvert, deleteReason);
+                        }
                         DeleteAudioTempFile(audioFileToConvert);
                     }
                 }
