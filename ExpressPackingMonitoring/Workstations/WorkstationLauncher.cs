@@ -22,6 +22,9 @@ public static class WorkstationRoles
 
     public static string GetDisplayName(string? role) =>
         string.Equals(role, PrintStation, StringComparison.OrdinalIgnoreCase) ? "快递单打印工位" : "摄像头监控工位";
+
+    public static string GetOtherRole(string role) =>
+        string.Equals(role, PrintStation, StringComparison.OrdinalIgnoreCase) ? CameraMonitor : PrintStation;
 }
 
 public static class WorkstationConfigStore
