@@ -12,6 +12,8 @@ using System.Threading;
 using System.IO;
 using System.Diagnostics;
 using System.Reflection;
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using ExpressPackingMonitoring.Services;
 using NAudio.CoreAudioApi;
 
@@ -35,6 +37,7 @@ namespace ExpressPackingMonitoring
         public double CurrentDiskUsagePercent { get; set; }
         public string CurrentDiskUsageText { get; set; }
         public string AppVersion { get; } = GetAppVersion();
+        public ImageSource AppIconImage { get; } = GetLargestAppIconImage();
         public List<EdgeVoiceOption> EdgeVoiceOptions { get; } = new()
         {
             new EdgeVoiceOption { ShortName = "zh-CN-XiaoxiaoNeural", DisplayName = "晓晓 - 女声" },
@@ -831,6 +834,19 @@ namespace ExpressPackingMonitoring
 
             Version version = assembly.GetName().Version;
             return version != null ? $"{version.Major}.{version.Minor}.{version.Build}" : "未知版本";
+        }
+
+        private static ImageSource GetLargestAppIconImage()
+        {
+            var decoder = BitmapDecoder.Create(
+                new Uri("pack://application:,,,/app.ico", UriKind.Absolute),
+                BitmapCreateOptions.PreservePixelFormat,
+                BitmapCacheOption.OnLoad);
+            BitmapFrame frame = decoder.Frames
+                .OrderByDescending(x => x.PixelWidth * x.PixelHeight)
+                .First();
+            frame.Freeze();
+            return frame;
         }
 
         private static void OpenExternalUrl(string url)
