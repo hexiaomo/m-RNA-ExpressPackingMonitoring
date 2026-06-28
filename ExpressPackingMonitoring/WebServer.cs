@@ -555,13 +555,21 @@ namespace ExpressPackingMonitoring
             {
                 string configPath = AppPaths.ConfigPath;
                 if (!File.Exists(configPath))
-                    return new AppConfig();
+                {
+                    var defaultConfig = new AppConfig();
+                    AppConfig.NormalizeAfterLoad(defaultConfig);
+                    return defaultConfig;
+                }
 
-                return JsonSerializer.Deserialize<AppConfig>(File.ReadAllText(configPath)) ?? new AppConfig();
+                var config = JsonSerializer.Deserialize<AppConfig>(File.ReadAllText(configPath)) ?? new AppConfig();
+                AppConfig.NormalizeAfterLoad(config);
+                return config;
             }
             catch
             {
-                return new AppConfig();
+                var config = new AppConfig();
+                AppConfig.NormalizeAfterLoad(config);
+                return config;
             }
         }
 

@@ -765,13 +765,10 @@ namespace ExpressPackingMonitoring.ViewModels
             if (!WorkstationRoles.IsKnown(Config.WorkstationRole))
                 Config.WorkstationRole = WorkstationRoles.CameraMonitor;
             Config.AudioSyncOffsetMs = Math.Clamp(Config.AudioSyncOffsetMs, -5000, 5000);
-            if (string.IsNullOrWhiteSpace(Config.AiTtsEngine))
-                Config.AiTtsEngine = "Edge";
-            if (string.IsNullOrWhiteSpace(Config.EdgeTtsVoice))
-                Config.EdgeTtsVoice = "zh-CN-XiaoxiaoNeural";
-            if (string.IsNullOrWhiteSpace(Config.EdgeTtsWarningVoice))
-                Config.EdgeTtsWarningVoice = "zh-CN-YunxiNeural";
-            
+            bool configMigrated = AppConfig.NormalizeAfterLoad(Config);
+            if (configMigrated)
+                SaveConfig();
+
             // Apply Theme
             if (Enum.TryParse<ExpressPackingMonitoring.Themes.AppTheme>(Config.Theme, out var themeEnum))
             {

@@ -50,6 +50,11 @@ namespace ExpressPackingMonitoring.ViewModels
 
     public class AppConfig
     {
+        public const int CurrentVoiceSettingsVersion = 2;
+
+        // 语音提醒设置迁移版本。旧配置没有该字段，加载后会从 0 迁移到当前版本。
+        public int VoiceSettingsVersion { get; set; } = 0;
+
         // 工位用途："CameraMonitor"=摄像头监控工位，"PrintStation"=快递单打印工位，空值表示首次启动需要选择。
         public string WorkstationRole { get; set; } = "";
         public string PrintStationMonitorAddress { get; set; } = "";
@@ -140,5 +145,49 @@ namespace ExpressPackingMonitoring.ViewModels
         public List<GpuEncoderOption> EncoderOptionsCache { get; set; } = new();
         public List<string> ValidatedEncodersCache { get; set; } = new();
         public bool IsEncoderDetected { get; set; } = false;
+
+        public static bool NormalizeAfterLoad(AppConfig config)
+        {
+            bool changed = false;
+
+            string normalizedEngine = NormalizeAiTtsEngine(config.AiTtsEngine);
+            if (config.AiTtsEngine != normalizedEngine)
+            {
+                config.AiTtsEngine = normalizedEngine;
+                changed = true;
+            }
+
+            if (string.IsNullOrWhiteSpace(config.EdgeTtsVoice))
+            {
+                config.EdgeTtsVoice = "zh-CN-XiaoxiaoNeural";
+                changed = true;
+            }
+
+            if (string.IsNullOrWhiteSpace(config.EdgeTtsWarningVoice))
+            {
+                config.EdgeTtsWarningVoice = "zh-CN-YunxiNeural";
+                changed = true;
+            }
+
+            if (config.VoiceSettingsVersion < CurrentVoiceSettingsVersion)
+            {
+                // 旧版把“是否播放提示”和“是否使用 AI 语音”拆成两个开关。
+                // 新版合并成“语音提醒”总开关 + “语音引擎”选择；旧用户只要曾启用 AI 语音，就保留语音提醒开启。
+                if (config.EnableAiTts && !config.EnableSoundPrompt)
+                {
+                    config.EnableSoundPrompt = true;
+                }
+
+                config.VoiceSettingsVersion = CurrentVoiceSettingsVersion;
+                changed = true;
+            }
+
+            return changed;
+        }
+
+        private static string NormalizeAiTtsEngine(string engine)
+        {
+            return string.Equals(engine, "Kokoro", System.StringComparison.OrdinalIgnoreCase) ? "Kokoro" : "Edge";
+        }
     }
 }

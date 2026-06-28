@@ -675,8 +675,11 @@ namespace ExpressPackingMonitoring
         private static AppConfig LoadConfig()
         {
             string configPath = AppPaths.ConfigPath;
-            if (!File.Exists(configPath)) return new AppConfig();
-            return JsonSerializer.Deserialize<AppConfig>(File.ReadAllText(configPath)) ?? new AppConfig();
+            var config = File.Exists(configPath)
+                ? JsonSerializer.Deserialize<AppConfig>(File.ReadAllText(configPath)) ?? new AppConfig()
+                : new AppConfig();
+            AppConfig.NormalizeAfterLoad(config);
+            return config;
         }
 
         private static MMDevice ResolveAudioEndpoint(AppConfig config, MMDeviceCollection devices)

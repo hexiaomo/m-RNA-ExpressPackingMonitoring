@@ -37,13 +37,20 @@ public static class WorkstationConfigStore
         try
         {
             if (File.Exists(AppPaths.ConfigPath))
-                return JsonSerializer.Deserialize<AppConfig>(File.ReadAllText(AppPaths.ConfigPath)) ?? new AppConfig();
+            {
+                var config = JsonSerializer.Deserialize<AppConfig>(File.ReadAllText(AppPaths.ConfigPath)) ?? new AppConfig();
+                if (AppConfig.NormalizeAfterLoad(config))
+                    Save(config);
+                return config;
+            }
         }
         catch
         {
         }
 
-        return new AppConfig();
+        var defaultConfig = new AppConfig();
+        AppConfig.NormalizeAfterLoad(defaultConfig);
+        return defaultConfig;
     }
 
     public static void Save(AppConfig config)
