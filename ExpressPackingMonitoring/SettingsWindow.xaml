@@ -420,14 +420,14 @@
         </Style>
 
         <Style x:Key="FieldLabelStyle" TargetType="TextBlock">
-            <Setter Property="FontSize" Value="14"/>
+            <Setter Property="FontSize" Value="13"/>
             <Setter Property="FontWeight" Value="SemiBold"/>
             <Setter Property="Foreground" Value="{DynamicResource TextPrimary}"/>
         </Style>
 
         <Style x:Key="FieldHintStyle" TargetType="TextBlock">
-            <Setter Property="Margin" Value="0,2,0,0"/>
-            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Margin" Value="0,3,0,0"/>
+            <Setter Property="FontSize" Value="11"/>
             <Setter Property="Foreground" Value="{DynamicResource TextSecondary}"/>
             <Setter Property="TextWrapping" Value="Wrap"/>
             <Setter Property="LineHeight" Value="16"/>
@@ -441,6 +441,12 @@
                     <Setter Property="Opacity" Value="0.58"/>
                 </Trigger>
             </Style.Triggers>
+        </Style>
+
+        <Style x:Key="SectionDividerStyle" TargetType="Border">
+            <Setter Property="Height" Value="1"/>
+            <Setter Property="Background" Value="{DynamicResource BorderLight}"/>
+            <Setter Property="Margin" Value="0,12,0,14"/>
         </Style>
 
         <!-- 5. 按钮基础样式 -->
@@ -735,7 +741,7 @@
                                     <TextBlock Text="采集设备" Style="{StaticResource SectionTitleStyle}"/>
                                     <TextBlock Text="这些选项决定录像来源和整体清晰度，建议优先确认。"
                                                Style="{StaticResource SectionHintStyle}"/>
-                                    <Border Height="1" Background="{DynamicResource BorderLight}" Margin="0,12,0,12"/>
+                                    <Border Style="{StaticResource SectionDividerStyle}"/>
 
                                     <Grid Style="{StaticResource SettingRowStyle}">
                                         <Grid.ColumnDefinitions>
@@ -854,7 +860,7 @@
                                     <TextBlock Text="录像质量" Style="{StaticResource SectionTitleStyle}"/>
                                     <TextBlock Text="清晰度越高，占用空间越大；帧率越高，画面越流畅。"
                                                Style="{StaticResource SectionHintStyle}"/>
-                                    <Border Height="1" Background="{DynamicResource BorderLight}" Margin="0,12,0,12"/>
+                                    <Border Style="{StaticResource SectionDividerStyle}"/>
 
                                     <Grid Style="{StaticResource SettingRowStyle}">
                                         <Grid.ColumnDefinitions>
@@ -978,7 +984,7 @@
                                     <TextBlock Text="启用智能特写" Style="{StaticResource SectionTitleStyle}"/>
                                     <TextBlock Text="当系统识别到需要关注的画面时，自动放大关键区域。"
                                                Style="{StaticResource SectionHintStyle}"/>
-                                    <Border Height="1" Background="{DynamicResource BorderLight}" Margin="0,12,0,12"/>
+                                    <Border Style="{StaticResource SectionDividerStyle}"/>
 
                                     <Grid Style="{StaticResource SettingRowStyle}">
                                         <Grid.ColumnDefinitions>
@@ -1007,7 +1013,7 @@
                                     <TextBlock Text="特写参数" Style="{StaticResource SectionTitleStyle}"/>
                                     <TextBlock Text="这些参数控制特写触发节奏和持续时间。"
                                                Style="{StaticResource SectionHintStyle}"/>
-                                    <Border Height="1" Background="{DynamicResource BorderLight}" Margin="0,12,0,12"/>
+                                    <Border Style="{StaticResource SectionDividerStyle}"/>
 
                                     <Grid Style="{StaticResource SettingRowStyle}">
                                         <Grid.ColumnDefinitions>
@@ -1027,7 +1033,7 @@
                                                   Cursor="Hand"/>
                                     </Grid>
 
-                                    <Grid Style="{StaticResource SettingRowStyle}" Margin="0,0,0,8">
+                                    <Grid Style="{StaticResource SettingRowStyle}" Margin="0,0,0,14">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*"/>
                                             <ColumnDefinition Width="24"/>
@@ -1063,7 +1069,7 @@
                                                            Increment="0.5"/>
                                     </Grid>
 
-                                    <Border Height="1" Background="{DynamicResource BorderLight}" Margin="0,12,0,12"/>
+                                    <Border Style="{StaticResource SectionDividerStyle}"/>
 
                                     <Grid Style="{StaticResource SettingRowStyle}">
                                         <Grid.ColumnDefinitions>
@@ -1119,7 +1125,7 @@
                                     <TextBlock Text="提示与录制时长" Style="{StaticResource SectionTitleStyle}"/>
                                     <TextBlock Text="这里控制预警提示，以及录像何时自动停止。"
                                                Style="{StaticResource SectionHintStyle}"/>
-                                    <Border Height="1" Background="{DynamicResource BorderLight}" Margin="0,12,0,12"/>
+                                    <Border Style="{StaticResource SectionDividerStyle}"/>
 
                                     <Grid Style="{StaticResource SettingRowStyle}">
                                         <Grid.ColumnDefinitions>
@@ -1139,7 +1145,7 @@
                                                   Style="{StaticResource ToggleSwitchStyle}"/>
                                     </Grid>
 
-                                    <Grid Style="{StaticResource SettingRowStyle}" Margin="0,0,0,8">
+                                    <Grid Style="{StaticResource SettingRowStyle}" Margin="0,0,0,14">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*"/>
                                             <ColumnDefinition Width="24"/>
@@ -1158,7 +1164,7 @@
                                                            Increment="1"/>
                                     </Grid>
 
-                                    <Grid Style="{StaticResource SettingRowStyle}" Margin="0,0,0,8">
+                                    <Grid Style="{StaticResource SettingRowStyle}" Margin="0,0,0,14">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*"/>
                                             <ColumnDefinition Width="24"/>
@@ -1178,7 +1184,7 @@
                                     </Grid>
 
                                     <Grid Style="{StaticResource SettingRowStyle}"
- Margin="0,0,0,8"
+                                          Margin="0,0,0,14"
                                           IsEnabled="{Binding IsChecked, ElementName=AutoStopCheckBox, TargetNullValue=False}">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*"/>
@@ -1198,7 +1204,7 @@
                                                            Increment="0.5"/>
                                     </Grid>
 
-                                    <Grid Style="{StaticResource SettingRowStyle}" Margin="0,0,0,8">
+                                    <Grid Style="{StaticResource SettingRowStyle}" Margin="0,0,0,14">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*"/>
                                             <ColumnDefinition Width="24"/>
@@ -1238,7 +1244,7 @@
                                                            Increment="0.5"/>
                                     </Grid>
 
-                                    <Border Height="1" Background="{DynamicResource BorderLight}" Margin="0,12,0,12"/>
+                                    <Border Style="{StaticResource SectionDividerStyle}"/>
 
                                     <Grid Style="{StaticResource SettingRowStyle}" Margin="0,0,0,0">
                                         <Grid.ColumnDefinitions>
@@ -1259,9 +1265,9 @@
                                                            Increment="1"/>
                                     </Grid>
 
-                                    <Border Height="1" Background="{DynamicResource BorderLight}" Margin="0,12,0,12"/>
+                                    <Border Style="{StaticResource SectionDividerStyle}"/>
 
-                                    <Grid Style="{StaticResource SettingRowStyle}" Margin="0,0,0,8">
+                                    <Grid Style="{StaticResource SettingRowStyle}" Margin="0,0,0,14">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*"/>
                                             <ColumnDefinition Width="24"/>
@@ -1314,7 +1320,7 @@
                                     <TextBlock Text="磁盘阵列配置" Style="{StaticResource SectionTitleStyle}"/>
                                     <TextBlock Text="系统按优先级从小到大写入；空间不足时自动清理全局最旧录像。"
                                                Style="{StaticResource SectionHintStyle}"/>
-                                    <Border Height="1" Background="{DynamicResource BorderLight}" Margin="0,12,0,12"/>
+                                    <Border Style="{StaticResource SectionDividerStyle}"/>
 
                                     <Border BorderBrush="{DynamicResource BorderLight}"
                                             BorderThickness="1"
@@ -1416,7 +1422,7 @@
                                     <TextBlock Text="回放列表" Style="{StaticResource SectionTitleStyle}"/>
                                     <TextBlock Text="控制历史回放中是否显示已被覆盖的记录。"
                                                Style="{StaticResource SectionHintStyle}"/>
-                                    <Border Height="1" Background="{DynamicResource BorderLight}" Margin="0,12,0,12"/>
+                                    <Border Style="{StaticResource SectionDividerStyle}"/>
 
                                     <Grid Style="{StaticResource SettingRowStyle}" Margin="0">
                                         <Grid.ColumnDefinitions>
@@ -1443,7 +1449,7 @@
                                     <TextBlock Text="历史数据迁移" Style="{StaticResource SectionTitleStyle}"/>
                                     <TextBlock Text="将旧版本 MKV 录像批量转换为 MP4，保留原有记录关联。"
                                                Style="{StaticResource SectionHintStyle}"/>
-                                    <Border Height="1" Background="{DynamicResource BorderLight}" Margin="0,12,0,12"/>
+                                    <Border Style="{StaticResource SectionDividerStyle}"/>
 
                                     <Grid>
                                         <Grid.RowDefinitions>
@@ -1491,11 +1497,11 @@
                             <Border Style="{StaticResource SectionCardStyle}">
                                 <StackPanel>
                                     <TextBlock Text="AI 语音合成" Style="{StaticResource SectionTitleStyle}"/>
-                                    <TextBlock Text="可选择 Kokoro 本地模型或 Edge TTS 在线语音，生成后写入缓存；不可用时回退系统语音。"
+                                    <TextBlock Text="选择语音引擎并控制基础播放参数。关闭后使用系统自带语音。"
                                                Style="{StaticResource SectionHintStyle}"/>
-                                    <Border Height="1" Background="{DynamicResource BorderLight}" Margin="0,12,0,12"/>
+                                    <Border Style="{StaticResource SectionDividerStyle}"/>
 
-                                    <Grid Style="{StaticResource SettingRowStyle}" Margin="0,0,0,8">
+                                    <Grid Style="{StaticResource SettingRowStyle}">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*"/>
                                             <ColumnDefinition Width="24"/>
@@ -1514,7 +1520,7 @@
                                                   Style="{StaticResource ToggleSwitchStyle}"/>
                                     </Grid>
 
-                                    <Grid Style="{StaticResource SettingRowStyle}" Margin="0,0,0,8"
+                                    <Grid Style="{StaticResource SettingRowStyle}"
                                           IsEnabled="{Binding IsChecked, ElementName=AiTtsCheckBox, TargetNullValue=False}">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*"/>
@@ -1536,8 +1542,37 @@
                                         </ComboBox>
                                     </Grid>
 
-                                    <Grid Style="{StaticResource SettingRowStyle}" Margin="0,0,0,8"
+                                    <Grid Style="{StaticResource SettingRowStyle}" Margin="0"
                                           IsEnabled="{Binding IsChecked, ElementName=AiTtsCheckBox, TargetNullValue=False}">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="24"/>
+                                            <ColumnDefinition Width="260"/>
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Margin="0,0,16,0">
+                                            <TextBlock Text="语速" Style="{StaticResource FieldLabelStyle}"/>
+                                            <TextBlock Text="语音播放速度，1.0 为正常速度。"
+                                                       Style="{StaticResource FieldHintStyle}"/>
+                                        </StackPanel>
+                                        <xctk:DoubleUpDown Grid.Column="2"
+                                                           Height="36"
+                                                           Value="{Binding Config.AiTtsSpeed}"
+                                                           Minimum="0.5"
+                                                           Maximum="2.0"
+                                                           Increment="0.1"/>
+                                    </Grid>
+                                </StackPanel>
+                            </Border>
+
+                            <Border Style="{StaticResource SectionCardStyle}"
+                                    IsEnabled="{Binding IsChecked, ElementName=AiTtsCheckBox, TargetNullValue=False}">
+                                <StackPanel>
+                                    <TextBlock Text="声线设置" Style="{StaticResource SectionTitleStyle}"/>
+                                    <TextBlock Text="分别设置普通播报和警告播报使用的声音角色。"
+                                               Style="{StaticResource SectionHintStyle}"/>
+                                    <Border Style="{StaticResource SectionDividerStyle}"/>
+
+                                    <Grid Style="{StaticResource SettingRowStyle}">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*"/>
                                             <ColumnDefinition Width="24"/>
@@ -1556,8 +1591,7 @@
                                                             Increment="1"/>
                                     </Grid>
 
-                                    <Grid Style="{StaticResource SettingRowStyle}" Margin="0,0,0,8"
-                                          IsEnabled="{Binding IsChecked, ElementName=AiTtsCheckBox, TargetNullValue=False}">
+                                    <Grid Style="{StaticResource SettingRowStyle}">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*"/>
                                             <ColumnDefinition Width="24"/>
@@ -1576,8 +1610,7 @@
                                                             Increment="1"/>
                                     </Grid>
 
-                                    <Grid Style="{StaticResource SettingRowStyle}" Margin="0,0,0,8"
-                                          IsEnabled="{Binding IsChecked, ElementName=AiTtsCheckBox, TargetNullValue=False}">
+                                    <Grid Style="{StaticResource SettingRowStyle}">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*"/>
                                             <ColumnDefinition Width="24"/>
@@ -1598,8 +1631,7 @@
                                                   SelectedValue="{Binding Config.EdgeTtsVoice, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
                                     </Grid>
 
-                                    <Grid Style="{StaticResource SettingRowStyle}" Margin="0,0,0,8"
-                                          IsEnabled="{Binding IsChecked, ElementName=AiTtsCheckBox, TargetNullValue=False}">
+                                    <Grid Style="{StaticResource SettingRowStyle}" Margin="0">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*"/>
                                             <ColumnDefinition Width="24"/>
@@ -1619,37 +1651,24 @@
                                                   SelectedValuePath="ShortName"
                                                   SelectedValue="{Binding Config.EdgeTtsWarningVoice, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
                                     </Grid>
+                                </StackPanel>
+                            </Border>
 
-                                    <Grid Style="{StaticResource SettingRowStyle}" Margin="0,0,0,0"
-                                          IsEnabled="{Binding IsChecked, ElementName=AiTtsCheckBox, TargetNullValue=False}">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*"/>
-                                            <ColumnDefinition Width="24"/>
-                                            <ColumnDefinition Width="260"/>
-                                        </Grid.ColumnDefinitions>
-                                        <StackPanel Margin="0,0,16,0">
-                                            <TextBlock Text="语速" Style="{StaticResource FieldLabelStyle}"/>
-                                            <TextBlock Text="语音播放速度，1.0 为正常速度。"
-                                                       Style="{StaticResource FieldHintStyle}"/>
-                                        </StackPanel>
-                                        <xctk:DoubleUpDown Grid.Column="2"
-                                                           Height="36"
-                                                           Value="{Binding Config.AiTtsSpeed}"
-                                                           Minimum="0.5"
-                                                           Maximum="2.0"
-                                                           Increment="0.1"/>
-                                    </Grid>
+                            <Border Style="{StaticResource SectionCardStyle}"
+                                    IsEnabled="{Binding IsChecked, ElementName=AiTtsCheckBox, TargetNullValue=False}">
+                                <StackPanel>
+                                    <TextBlock Text="语音预览与断句" Style="{StaticResource SectionTitleStyle}"/>
+                                    <TextBlock Text="试听当前语音参数，并维护商品名断句关键词。"
+                                               Style="{StaticResource SectionHintStyle}"/>
+                                    <Border Style="{StaticResource SectionDividerStyle}"/>
 
-                                    <Border Height="1" Background="{DynamicResource BorderLight}" Margin="0,8,0,8"/>
-
-                                    <Grid Style="{StaticResource SettingRowStyle}" Margin="0,0,0,8"
-                                          IsEnabled="{Binding IsChecked, ElementName=AiTtsCheckBox, TargetNullValue=False}">
+                                    <Grid Style="{StaticResource SettingRowStyle}">
                                         <Grid.RowDefinitions>
                                             <RowDefinition Height="Auto"/>
                                             <RowDefinition Height="Auto"/>
                                             <RowDefinition Height="Auto"/>
                                         </Grid.RowDefinitions>
-                                        <StackPanel Grid.Row="0" Margin="0,0,0,8">
+                                        <StackPanel Grid.Row="0" Margin="0,0,0,10">
                                             <TextBlock Text="语音预览" Style="{StaticResource FieldLabelStyle}"/>
                                             <TextBlock Text="输入文本测试 TTS 效果，可验证断句和语音质量。"
                                                        Style="{StaticResource FieldHintStyle}"/>
@@ -1658,7 +1677,7 @@
                                                  AcceptsReturn="True" TextWrapping="Wrap"
                                                  VerticalScrollBarVisibility="Auto"
                                                  Text="打包监控程序官方开源软件适用中小电商"/>
-                                        <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,8,0,0">
+                                        <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,10,0,0">
                                             <Button Content="播放" x:Name="BtnTtsPreview" Click="BtnTtsPreview_Click"
                                                     Style="{StaticResource PrimaryActionButtonStyle}"
                                                     Width="70" Margin="0,0,8,0"/>
@@ -1669,15 +1688,12 @@
                                         </StackPanel>
                                     </Grid>
 
-                                    <Border Height="1" Background="{DynamicResource BorderLight}" Margin="0,4,0,8"/>
-
-                                    <Grid Style="{StaticResource SettingRowStyle}" Margin="0,0,0,0"
-                                          IsEnabled="{Binding IsChecked, ElementName=AiTtsCheckBox, TargetNullValue=False}">
+                                    <Grid Style="{StaticResource SettingRowStyle}" Margin="0">
                                         <Grid.RowDefinitions>
                                             <RowDefinition Height="Auto"/>
                                             <RowDefinition Height="Auto"/>
                                         </Grid.RowDefinitions>
-                                        <StackPanel Grid.Row="0" Margin="0,0,0,8">
+                                        <StackPanel Grid.Row="0" Margin="0,0,0,10">
                                             <TextBlock Text="断句关键词" Style="{StaticResource FieldLabelStyle}"/>
                                             <TextBlock Text="长商品名会在这些词前自动插入停顿，每行一个关键词。可根据实际商品类目增减。"
                                                        Style="{StaticResource FieldHintStyle}"/>
@@ -1692,7 +1708,6 @@
                     </ScrollViewer>
                 </Border>
             </TabItem>
-
             <TabItem Header="高级设置">
                 <Border Background="Transparent" Padding="0,4,0,0">
                     <ScrollViewer VerticalScrollBarVisibility="Auto">
@@ -1703,7 +1718,7 @@
                                     <TextBlock Text="视频水印" Style="{StaticResource SectionTitleStyle}"/>
                                     <TextBlock Text="在录像画面右上角叠加单号和实时时间戳。"
                                                Style="{StaticResource SectionHintStyle}"/>
-                                    <Border Height="1" Background="{DynamicResource BorderLight}" Margin="0,12,0,12"/>
+                                    <Border Style="{StaticResource SectionDividerStyle}"/>
 
                                     <Grid Style="{StaticResource SettingRowStyle}" Margin="0,0,0,0">
                                         <Grid.ColumnDefinitions>
@@ -1731,9 +1746,9 @@
                                     <TextBlock Text="局域网 Web 服务" Style="{StaticResource SectionTitleStyle}"/>
                                     <TextBlock Text="在局域网内提供视频查看、回放和下载服务，可通过浏览器访问。"
                                                Style="{StaticResource SectionHintStyle}"/>
-                                    <Border Height="1" Background="{DynamicResource BorderLight}" Margin="0,12,0,12"/>
+                                    <Border Style="{StaticResource SectionDividerStyle}"/>
 
-                                    <Grid Style="{StaticResource SettingRowStyle}" Margin="0,0,0,8">
+                                    <Grid Style="{StaticResource SettingRowStyle}" Margin="0,0,0,14">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*"/>
                                             <ColumnDefinition Width="24"/>
@@ -1751,7 +1766,7 @@
                                                   Style="{StaticResource ToggleSwitchStyle}"/>
                                     </Grid>
 
-                                    <Grid Style="{StaticResource SettingRowStyle}" Margin="0,0,0,8">
+                                    <Grid Style="{StaticResource SettingRowStyle}" Margin="0,0,0,14">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*"/>
                                             <ColumnDefinition Width="24"/>
@@ -1789,7 +1804,7 @@
                                                             Increment="256"/>
                                     </Grid>
 
-                                    <Grid Style="{StaticResource SettingRowStyle}" Margin="0,0,0,8">
+                                    <Grid Style="{StaticResource SettingRowStyle}" Margin="0,0,0,14">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*"/>
                                             <ColumnDefinition Width="24"/>
@@ -1875,9 +1890,9 @@
                                     <TextBlock Text="识别与启动" Style="{StaticResource SectionTitleStyle}"/>
                                     <TextBlock Text="这些选项决定单号识别规则，以及程序是否随系统启动。"
                                                Style="{StaticResource SectionHintStyle}"/>
-                                    <Border Height="1" Background="{DynamicResource BorderLight}" Margin="0,12,0,12"/>
+                                    <Border Style="{StaticResource SectionDividerStyle}"/>
 
-                                    <Grid Style="{StaticResource SettingRowStyle}" Margin="0,0,0,8">
+                                    <Grid Style="{StaticResource SettingRowStyle}" Margin="0,0,0,14">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*"/>
                                             <ColumnDefinition Width="24"/>
@@ -1949,7 +1964,7 @@
                                                            Increment="0.5"/>
                                     </Grid>
 
-                                    <Border Height="1" Background="{DynamicResource BorderLight}" Margin="0,12,0,12"/>
+                                    <Border Style="{StaticResource SectionDividerStyle}"/>
                                     <Grid Style="{StaticResource SettingRowStyle}" Margin="0,0,0,0">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*"/>
@@ -1983,7 +1998,7 @@
                                     <TextBlock Text="关于与开源许可" Style="{StaticResource SectionTitleStyle}"/>
                                     <TextBlock Text="查看项目源码、许可证和开源使用说明。"
                                                Style="{StaticResource SectionHintStyle}"/>
-                                    <Border Height="1" Background="{DynamicResource BorderLight}" Margin="0,12,0,12"/>
+                                    <Border Style="{StaticResource SectionDividerStyle}"/>
 
                                     <Grid Style="{StaticResource SettingRowStyle}" Margin="0,0,0,12">
                                         <Grid.ColumnDefinitions>
