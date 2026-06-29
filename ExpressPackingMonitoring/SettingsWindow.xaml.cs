@@ -12,6 +12,8 @@ using System.Threading;
 using System.IO;
 using System.Diagnostics;
 using System.Reflection;
+using System.Globalization;
+using System.Windows.Data;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using ExpressPackingMonitoring.Services;
@@ -29,6 +31,51 @@ namespace ExpressPackingMonitoring
     }
     public class FpsOption { public int Fps { get; set; } public string Label { get; set; } public override string ToString() => Label; }
     public class EdgeVoiceOption { public string ShortName { get; set; } public string DisplayName { get; set; } public override string ToString() => DisplayName; }
+
+    public sealed class CqpToQualitySliderConverter : IValueConverter
+    {
+        public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
+        {
+            double cqp = System.Convert.ToDouble(value, CultureInfo.InvariantCulture);
+            return Math.Clamp((51 - cqp) * 2.0, 0, 100);
+        }
+
+        public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
+        {
+            double quality = System.Convert.ToDouble(value, CultureInfo.InvariantCulture);
+            int cqp = (int)Math.Round(51 - Math.Clamp(quality, 0, 100) / 2.0);
+            return Math.Clamp(cqp, 1, 51);
+        }
+    }
+
+    public sealed class IntSliderValueConverter : IValueConverter
+    {
+        public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
+        {
+            if (value == null) return 0d;
+            return System.Convert.ToDouble(value, CultureInfo.InvariantCulture);
+        }
+
+        public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
+        {
+            double sliderValue = System.Convert.ToDouble(value, CultureInfo.InvariantCulture);
+            return (int)Math.Round(sliderValue);
+        }
+    }
+
+    public sealed class VideoQualityLabelConverter : IValueConverter
+    {
+        public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
+        {
+            double quality = System.Convert.ToDouble(value, CultureInfo.InvariantCulture);
+            if (quality < 34) return "更省空间";
+            if (quality < 67) return "标准（推荐）";
+            return "更清晰";
+        }
+
+        public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture) =>
+            Binding.DoNothing;
+    }
 
     public partial class SettingsWindow : Window
     {
@@ -77,9 +124,7 @@ namespace ExpressPackingMonitoring
             LoadGpuEncoders();
             LoadVideoCodecs();
 
-            // 非DirectShow的预设
-            ZoomScaleComboBox.ItemsSource = new List<double> { 1.2, 1.5, 2.0, 2.5, 3.0, 4.0 };
-            if (!ZoomScaleComboBox.Items.Contains(Config.ZoomScale)) Config.ZoomScale = 1.5;
+            if (Config.ZoomScale < 1.2 || Config.ZoomScale > 4.0) Config.ZoomScale = 1.5;
 
             EnsurePrimaryStorageLocationExists();
             // 如果没有数据项，构造1个默认项，UI DataGrid 绑定后自动显示
@@ -595,12 +640,10 @@ namespace ExpressPackingMonitoring
             this.Close();
         }
 
-        private void ZoomScaleComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        private void ZoomScaleSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
         {
-            if (ZoomScaleComboBox.SelectedItem is double scale)
-            {
-                MainVM.PreviewZoomScale = scale;
-            }
+            if (MainVM != null)
+                MainVM.PreviewZoomScale = e.NewValue;
         }
 
         private void SyncVoiceEngineComboBoxFromConfig()
