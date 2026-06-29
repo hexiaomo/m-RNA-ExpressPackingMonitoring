@@ -2468,14 +2468,15 @@ namespace ExpressPackingMonitoring.ViewModels
         private void WriteAudioDiagnostic(string message, string? explicitLogPath = null)
         {
 #if DEBUG
-            if (explicitLogPath == null && message.StartsWith("Finalize ", StringComparison.Ordinal))
-                return;
-            if (explicitLogPath == null
-                && (message.StartsWith("MP4 ", StringComparison.Ordinal) || message.StartsWith("WAV ", StringComparison.Ordinal)))
-                return;
+            bool shouldWrite = !ShouldSkipDebugAudioDiagnostic(message, explicitLogPath);
+#else
+            bool shouldWrite = IsImportantAudioDiagnostic(message);
+#endif
 
+            if (!shouldWrite) return;
             Debug.WriteLine($"[AudioDiagnostic] {message}");
-
+            if (IsImportantAudioDiagnostic(message))
+                RuntimeLog.Warn("Audio", message);
             string? logPath = explicitLogPath ?? _currentAudioLogPath;
             if (string.IsNullOrWhiteSpace(logPath)) return;
 
@@ -2485,7 +2486,39 @@ namespace ExpressPackingMonitoring.ViewModels
                 File.AppendAllText(logPath, $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} {message}{Environment.NewLine}");
             }
             catch { }
-#endif
+        }
+
+        private static bool ShouldSkipDebugAudioDiagnostic(string message, string? explicitLogPath)
+        {
+            if (explicitLogPath == null && message.StartsWith("Finalize ", StringComparison.Ordinal))
+                return true;
+            if (explicitLogPath == null
+                && (message.StartsWith("MP4 ", StringComparison.Ordinal) || message.StartsWith("WAV ", StringComparison.Ordinal)))
+                return true;
+            return false;
+        }
+
+        private static bool IsImportantAudioDiagnostic(string message)
+        {
+            if (string.IsNullOrWhiteSpace(message)) return false;
+
+            string[] importantKeywords =
+            {
+                "失败",
+                "异常",
+                "超时",
+                "队列已满",
+                "不可用",
+                "不稳定",
+                "断流",
+                "未找到",
+                "放弃",
+                "保留 MKV",
+                "保留原始文件",
+                "跳过 MP4"
+            };
+
+            return importantKeywords.Any(keyword => message.Contains(keyword, StringComparison.OrdinalIgnoreCase));
         }
 
         private void ClearCurrentAudioLogPath(string? audioLogPath)
