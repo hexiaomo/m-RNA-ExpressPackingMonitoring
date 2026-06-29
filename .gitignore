@@ -35,3 +35,5 @@ kokoro-multi-lang-v1_0.tar.bz2
 
 # Local screenshots captured during manual testing
 Image/PixPin_*.png
+Image/PixPin_*.jpg
+.tmp/
