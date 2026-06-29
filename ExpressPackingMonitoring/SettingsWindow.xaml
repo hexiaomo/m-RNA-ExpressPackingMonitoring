@@ -1535,9 +1535,19 @@
                         <StackPanel>
                             <Border Style="{StaticResource SectionCardStyle}">
                                 <StackPanel>
-                                    <TextBlock Text="最大容量表示该目录最多保存多少 GB 录像；使用顺序数字越小越优先写入，普通用户保持默认即可"
-                                               Style="{StaticResource FieldHintStyle}"
-                                               Margin="0,0,0,10"/>
+                                    <Grid Style="{StaticResource SettingRowStyle}" Margin="0,0,0,14">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="24"/>
+                                            <ColumnDefinition Width="260"/>
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Margin="0,0,16,0">
+                                            <TextBlock Text="录像保存位置" Style="{StaticResource FieldLabelStyle}"/>
+                                            <TextBlock Text="配置录像保存目录、容量和使用顺序"
+                                                       Style="{StaticResource FieldHintStyle}"/>
+                                        </StackPanel>
+                                    </Grid>
+
                                     <Border BorderBrush="{DynamicResource BorderLight}"
                                             BorderThickness="1"
                                             CornerRadius="8"
@@ -1643,8 +1653,10 @@
                                             </DataGrid.Columns>
                                         </DataGrid>
                                     </Border>
-
-                                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,14,0,0">
+                                    <TextBlock Text="最大容量表示该目录最多保存多少 GB 录像；使用顺序数字越小越优先写入，普通用户保持默认即可"
+                                               Style="{StaticResource FieldHintStyle}"
+                                               Margin="0,10,0,0"/>
+                                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
                                         <Button Content="添加磁盘"
                                                 Click="BtnAddStorage_Click"
                                                 Style="{StaticResource SecondaryActionButtonStyle}"
@@ -1688,8 +1700,6 @@
                                         </StackPanel>
                                     </Grid>
 
-                                    <Border Style="{StaticResource SectionDividerStyle}"/>
-
                                     <Grid Style="{StaticResource SettingRowStyle}" Margin="0">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*"/>
@@ -1712,38 +1722,33 @@
 
                             <Border Style="{StaticResource SectionCardStyle}">
                                 <StackPanel>
-                                    <Grid>
-                                        <Grid.RowDefinitions>
-                                            <RowDefinition Height="Auto"/>
-                                            <RowDefinition Height="Auto"/>
-                                        </Grid.RowDefinitions>
-                                        <Grid Grid.Row="0">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="*"/>
-                                                <ColumnDefinition Width="Auto"/>
-                                            </Grid.ColumnDefinitions>
-                                            <StackPanel Margin="0,0,16,0" VerticalAlignment="Center">
-                                                <TextBlock Text="旧录像转 MP4" Style="{StaticResource FieldLabelStyle}"/>
-                                                <TextBlock x:Name="MigrationStatusText"
-                                                           Text="需要整理旧录像时再使用"
-                                                           Style="{StaticResource FieldHintStyle}"/>
-                                            </StackPanel>
-                                            <Button x:Name="BtnMigrateMkv"
-                                                    Grid.Column="1"
-                                                    Content="开始迁移"
-                                                    HorizontalAlignment="Right"
-                                                    Style="{StaticResource SecondaryActionButtonStyle}"
-                                                    Width="100"
-                                                    Click="BtnMigrateMkv_Click"/>
-                                        </Grid>
-                                        <ProgressBar x:Name="MigrationProgress"
-                                                     Grid.Row="1"
-                                                     Height="4"
-                                                     Margin="0,12,0,0"
-                                                     Visibility="Collapsed"
-                                                     IsIndeterminate="True"
-                                                     Foreground="{DynamicResource AccentBlue}"/>
+                                    <Grid Style="{StaticResource SettingRowStyle}" Margin="0">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="24"/>
+                                            <ColumnDefinition Width="260"/>
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Margin="0,0,16,0" VerticalAlignment="Center">
+                                            <TextBlock Text="旧录像转 MP4" Style="{StaticResource FieldLabelStyle}"/>
+                                            <TextBlock x:Name="MigrationStatusText"
+                                                       Text="需要整理旧录像时再使用"
+                                                       Style="{StaticResource FieldHintStyle}"/>
+                                        </StackPanel>
+                                        <Button x:Name="BtnMigrateMkv"
+                                                Grid.Column="2"
+                                                Content="开始迁移"
+                                                HorizontalAlignment="Left"
+                                                VerticalAlignment="Center"
+                                                Style="{StaticResource SecondaryActionButtonStyle}"
+                                                Width="110"
+                                                Click="BtnMigrateMkv_Click"/>
                                     </Grid>
+                                    <ProgressBar x:Name="MigrationProgress"
+                                                 Height="4"
+                                                 Margin="0,12,0,0"
+                                                 Visibility="Collapsed"
+                                                 IsIndeterminate="True"
+                                                 Foreground="{DynamicResource AccentBlue}"/>
                                 </StackPanel>
                             </Border>
                         </StackPanel>
