@@ -91,6 +91,7 @@
     <Compile Include="GlobalKeyboardHook.cs" />
     <Compile Include="MkvConversionResult.cs" />
     <Compile Include="RuntimeLog.cs" />
+    <Compile Include="ScannerAutoSubmitPolicy.cs" />
     <Compile Include="SpeechService.cs" />
     <Compile Include="MainViewModel.Cleanup.cs" />
     <Compile Include="MainViewModel.cs" />
