@@ -176,7 +176,7 @@ public sealed class DuplicateInstanceDialog : Window
     {
         _otherRole = otherRole;
         Title = "程序已经在运行";
-        Width = 460;
+        Width = 550;
         SizeToContent = SizeToContent.Height;
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
         ResizeMode = ResizeMode.NoResize;
@@ -197,22 +197,13 @@ public sealed class DuplicateInstanceDialog : Window
 
         var titleText = new TextBlock
         {
-            Text = "程序已经在运行",
+            Text = $"当前已打开：{WorkstationRoles.GetDisplayName(runningRole)}",
             FontSize = 20,
             FontWeight = FontWeights.SemiBold,
             Margin = new Thickness(0, 0, 0, 14)
         };
         titleText.SetResourceReference(TextBlock.ForegroundProperty, "TextPrimary");
         root.Children.Add(titleText);
-
-        var roleText = new TextBlock
-        {
-            Text = $"当前已打开：{WorkstationRoles.GetDisplayName(runningRole)}",
-            FontSize = 14,
-            Margin = new Thickness(0, 0, 0, 10)
-        };
-        roleText.SetResourceReference(TextBlock.ForegroundProperty, "TextPrimary");
-        root.Children.Add(roleText);
 
         var bodyText = new TextBlock
         {
