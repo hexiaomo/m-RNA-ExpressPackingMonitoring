@@ -1196,7 +1196,7 @@ namespace ExpressPackingMonitoring.ViewModels
                 {
                     await Task.Delay(TimeSpan.FromSeconds(5), _cts.Token);
                     var service = new UpdateCheckService();
-                    var result = await service.CheckAsync(_cts.Token);
+                    var result = await service.CheckAutomaticAsync(_cts.Token);
                     if (!result.HasUpdate || _isDisposed) return;
 
                     await Application.Current.Dispatcher.InvokeAsync(() =>

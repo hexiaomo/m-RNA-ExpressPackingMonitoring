@@ -1029,7 +1029,7 @@ namespace ExpressPackingMonitoring.UI
             try
             {
                 var service = new UpdateCheckService();
-                var result = await service.CheckAsync();
+                var result = await service.CheckManualAsync();
                 if (!result.HasUpdate)
                 {
                     CheckUpdateButton.Content = "已为最新";

@@ -24,6 +24,7 @@ namespace ExpressPackingMonitoring.Config
         public static readonly string EncoderDetectLogPath = Path.Combine(LogDir, "encoder_detect.log");
         public static readonly string RuntimeLogPath = Path.Combine(LogDir, "runtime.log");
         public static readonly string OrderInfoCachePath = Path.Combine(CacheDir, "orderinfo_cache.json");
+        public static readonly string UpdateCheckCachePath = Path.Combine(CacheDir, "update_check_cache.json");
 
         static AppPaths()
         {
