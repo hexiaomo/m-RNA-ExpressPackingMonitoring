@@ -406,6 +406,7 @@ public partial class FirstUseSetupWizardWindow : Window
             if (value > 8)
             {
                 MicStatusText.Text = "已检测到麦克风音量";
+                MicStatusText.Foreground = (System.Windows.Media.Brush)FindResource("AccentGreen");
             }
         }));
     }
@@ -471,7 +472,7 @@ public partial class FirstUseSetupWizardWindow : Window
             "没有检测到回车/换行结束符\n" +
             "请将扫码枪设置为“扫描后自动回车/换行”，否则软件可能无法自动开始录制\n" +
             "可联系扫码枪卖家：如何开启“扫描后自动回车 / Enter 后缀”";
-        ScanStatusText.Foreground = (System.Windows.Media.Brush)FindResource("TextPrimary");
+        ScanStatusText.Foreground = (System.Windows.Media.Brush)FindResource("AccentRed");
     }
 
     private void ScanTestTextBox_PreviewKeyDown(object sender, KeyEventArgs e)
@@ -479,7 +480,7 @@ public partial class FirstUseSetupWizardWindow : Window
         if (e.Key == Key.Enter || e.Key == Key.Return)
         {
             ScanStatusText.Text = "扫码枪测试通过";
-            ScanStatusText.Foreground = (System.Windows.Media.Brush)FindResource("AccentBlue");
+            ScanStatusText.Foreground = (System.Windows.Media.Brush)FindResource("AccentGreen");
             e.Handled = true;
         }
     }
