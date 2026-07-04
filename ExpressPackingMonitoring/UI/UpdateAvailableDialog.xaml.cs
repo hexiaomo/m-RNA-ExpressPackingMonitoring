@@ -2,7 +2,7 @@ using ExpressPackingMonitoring.Logging;
 using System.Windows;
 using ExpressPackingMonitoring.Services;
 
-namespace ExpressPackingMonitoring.Windows
+namespace ExpressPackingMonitoring.UI
 {
     public partial class UpdateAvailableDialog : Window
     {

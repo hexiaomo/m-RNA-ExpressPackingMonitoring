@@ -6,7 +6,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 
-namespace ExpressPackingMonitoring.Windows
+namespace ExpressPackingMonitoring.UI
 {
     public sealed class DriveSelectionDialog : Window
     {

@@ -15,7 +15,7 @@ using System.Windows.Media;
 using System.Windows.Threading;
 using LibVLCSharp.Shared;
 
-namespace ExpressPackingMonitoring.Windows
+namespace ExpressPackingMonitoring.UI
 {
     public class VideoItem
     {

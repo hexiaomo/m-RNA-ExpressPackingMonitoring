@@ -1,7 +1,7 @@
 using System;
 using System.Windows;
 
-namespace ExpressPackingMonitoring.Windows
+namespace ExpressPackingMonitoring.UI
 {
     public partial class ConfirmDialog : Window
     {

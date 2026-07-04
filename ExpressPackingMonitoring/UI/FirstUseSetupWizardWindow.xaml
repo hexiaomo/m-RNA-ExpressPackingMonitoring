@@ -1,4 +1,4 @@
-<Window x:Class="ExpressPackingMonitoring.Windows.FirstUseSetupWizardWindow"
+<Window x:Class="ExpressPackingMonitoring.UI.FirstUseSetupWizardWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="首次使用配置向导"

@@ -21,7 +21,7 @@ using System.Windows.Media.Imaging;
 using ZXing;
 using ZXing.Common;
 
-namespace ExpressPackingMonitoring.Windows;
+namespace ExpressPackingMonitoring.UI;
 
 public partial class FirstUseSetupWizardWindow : Window
 {

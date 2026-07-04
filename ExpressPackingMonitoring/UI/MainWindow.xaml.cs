@@ -7,7 +7,7 @@ using System.Windows.Input;
 using System.Windows.Threading;
 using ExpressPackingMonitoring.ViewModels;
 
-namespace ExpressPackingMonitoring.Windows
+namespace ExpressPackingMonitoring.UI
 {
     public partial class MainWindow : Window
     {

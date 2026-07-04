@@ -5,7 +5,7 @@ using System.Windows;
 using System.Windows.Documents;
 using System.Windows.Media;
 
-namespace ExpressPackingMonitoring.Windows
+namespace ExpressPackingMonitoring.UI
 {
     internal static class MarkdownFlowDocumentRenderer
     {

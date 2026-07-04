@@ -23,7 +23,7 @@ using System.Windows.Media.Imaging;
 using ExpressPackingMonitoring.Services;
 using NAudio.CoreAudioApi;
 
-namespace ExpressPackingMonitoring.Windows
+namespace ExpressPackingMonitoring.UI
 {
     public class CameraInfo { public int Index { get; set; } public string Name { get; set; } public string Moniker { get; set; } public override string ToString() => Name; }
     public class ResOption { public string Name { get; set; } public int Width { get; set; } public int Height { get; set; } public override string ToString() => Name; }

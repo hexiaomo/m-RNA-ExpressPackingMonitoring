@@ -1,4 +1,4 @@
-<Window x:Class="ExpressPackingMonitoring.Windows.StatisticsWindow"
+<Window x:Class="ExpressPackingMonitoring.UI.StatisticsWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="打包数据深度分析" Height="720" Width="1100"

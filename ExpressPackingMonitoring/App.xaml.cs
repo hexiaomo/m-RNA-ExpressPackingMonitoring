@@ -1,4 +1,4 @@
-using ExpressPackingMonitoring.Windows;
+using ExpressPackingMonitoring.UI;
 using ExpressPackingMonitoring.Logging;
 using ExpressPackingMonitoring.Audio;
 using System;

@@ -7,7 +7,7 @@ using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
 
-namespace ExpressPackingMonitoring.Windows
+namespace ExpressPackingMonitoring.UI
 {
     public class ChartItem
     {
