@@ -1,3 +1,6 @@
+using ExpressPackingMonitoring.Windows;
+using ExpressPackingMonitoring.Logging;
+using ExpressPackingMonitoring.Audio;
 using System;
 using System.Threading.Tasks;
 using System.Windows;

@@ -1,3 +1,4 @@
+using ExpressPackingMonitoring.Logging;
 using System.IO;
 using System.IO.Pipes;
 using System.Windows;

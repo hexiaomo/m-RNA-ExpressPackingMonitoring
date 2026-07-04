@@ -1,3 +1,5 @@
+using ExpressPackingMonitoring.Logging;
+using ExpressPackingMonitoring.Config;
 using System;
 using System.Diagnostics;
 using System.Linq;
