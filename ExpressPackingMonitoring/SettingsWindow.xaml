@@ -1585,6 +1585,7 @@
                                                   RowHeight="50"
                                                   FontSize="13"
                                                   SelectionMode="Single"
+                                                  SelectionChanged="StorageDataGrid_SelectionChanged"
                                                   CanUserSortColumns="False">
                                             <DataGrid.ColumnHeaderStyle>
                                                 <Style TargetType="DataGridColumnHeader">
@@ -1681,9 +1682,11 @@
                                                 Click="BtnAddStorage_Click"
                                                 Style="{StaticResource SecondaryButtonStyle}"
                                                 Margin="0,0,10,0"/>
-                                        <Button Content="移除选中"
+                                        <Button x:Name="RemoveStorageButton"
+                                                Content="移除选中"
                                                 Click="BtnRemoveStorage_Click"
-                                                Style="{StaticResource SecondaryButtonStyle}"/>
+                                                Style="{StaticResource SecondaryButtonStyle}"
+                                                IsEnabled="False"/>
                                     </StackPanel>
                                 </StackPanel>
                             </Border>

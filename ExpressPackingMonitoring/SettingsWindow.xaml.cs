@@ -131,6 +131,7 @@ namespace ExpressPackingMonitoring
             {
                 Config.StorageLocations.Add(new StorageLocation());
             }
+            UpdateRemoveStorageButtonState();
 
             // 从注册表读取实际的开机自启动状态
             Config.AutoStartOnBoot = IsAutoStartEnabled();
@@ -521,7 +522,7 @@ namespace ExpressPackingMonitoring
 
         private string SelectDefaultStoragePathFromDrive()
         {
-            var dialog = new DriveSelectionDialog
+            var dialog = new DriveSelectionDialog(Config.StorageLocations.Select(location => location.Path))
             {
                 Owner = this
             };
@@ -566,12 +567,24 @@ namespace ExpressPackingMonitoring
                 {
                     Config.StorageLocations.Remove(selected);
                     StorageDataGrid.Items.Refresh();
+                    UpdateRemoveStorageButtonState();
                 }
             }
             else
             {
                 MessageBox.Show("请先在列表中选中要移除的行。", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
             }
+        }
+
+        private void StorageDataGrid_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            UpdateRemoveStorageButtonState();
+        }
+
+        private void UpdateRemoveStorageButtonState()
+        {
+            if (RemoveStorageButton == null) return;
+            RemoveStorageButton.IsEnabled = StorageDataGrid?.SelectedItem is StorageLocation;
         }
 
         private void BtnSave_Click(object sender, RoutedEventArgs e)

@@ -14,7 +14,7 @@ namespace ExpressPackingMonitoring
 
         public string? SelectedRootPath { get; private set; }
 
-        public DriveSelectionDialog()
+        public DriveSelectionDialog(IEnumerable<string>? usedPaths = null)
         {
             Title = "选择磁盘分区";
             Width = 420;
@@ -54,9 +54,11 @@ namespace ExpressPackingMonitoring
             var content = new StackPanel();
             _driveList.MinHeight = 120;
             _driveList.MaxHeight = 260;
+            var drives = LoadDrives(usedPaths);
             _driveList.DisplayMemberPath = nameof(DriveOption.DisplayText);
-            _driveList.ItemsSource = LoadDrives();
-            _driveList.SelectedIndex = _driveList.Items.Count > 0 ? 0 : -1;
+            _driveList.ItemContainerStyle = CreateDriveItemContainerStyle();
+            _driveList.ItemsSource = drives;
+            _driveList.SelectedItem = drives.FirstOrDefault(drive => !drive.IsUsed);
             content.Children.Add(_driveList);
 
             var buttons = new StackPanel
@@ -71,15 +73,19 @@ namespace ExpressPackingMonitoring
                 Content = "确定",
                 MinWidth = 88,
                 Margin = new Thickness(0, 0, 10, 0),
-                IsEnabled = _driveList.Items.Count > 0
+                IsEnabled = _driveList.SelectedItem is DriveOption option && !option.IsUsed
             };
             ok.SetResourceReference(StyleProperty, "PrimaryButtonStyle");
             ok.Click += (_, _) =>
             {
-                if (_driveList.SelectedItem is not DriveOption selected) return;
+                if (_driveList.SelectedItem is not DriveOption selected || selected.IsUsed) return;
                 SelectedRootPath = selected.RootPath;
                 DialogResult = true;
                 Close();
+            };
+            _driveList.SelectionChanged += (_, _) =>
+            {
+                ok.IsEnabled = _driveList.SelectedItem is DriveOption option && !option.IsUsed;
             };
 
             var cancel = new Button
@@ -104,28 +110,58 @@ namespace ExpressPackingMonitoring
             Content = root;
         }
 
-        private static List<DriveOption> LoadDrives()
+        private static Style CreateDriveItemContainerStyle()
         {
+            var style = new Style(typeof(ListBoxItem));
+            style.Setters.Add(new Setter(UIElement.IsEnabledProperty, new System.Windows.Data.Binding(nameof(DriveOption.IsSelectable))));
+            return style;
+        }
+
+        private static List<DriveOption> LoadDrives(IEnumerable<string>? usedPaths)
+        {
+            var usedRoots = new HashSet<string>(
+                (usedPaths ?? Enumerable.Empty<string>())
+                    .Where(path => !string.IsNullOrWhiteSpace(path))
+                    .Select(GetDriveRoot),
+                StringComparer.OrdinalIgnoreCase);
+
             return DriveInfo.GetDrives()
                 .Where(drive => drive.IsReady)
                 .Where(drive => drive.DriveType is DriveType.Fixed or DriveType.Removable)
-                .Select(drive => new DriveOption(drive))
+                .Select(drive => new DriveOption(drive, usedRoots.Contains(GetDriveRoot(drive.RootDirectory.FullName))))
                 .OrderBy(option => option.RootPath, StringComparer.OrdinalIgnoreCase)
                 .ToList();
+        }
+
+        private static string GetDriveRoot(string path)
+        {
+            try
+            {
+                string fullPath = Path.GetFullPath(path.Trim());
+                return Path.GetPathRoot(fullPath)?.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) ?? fullPath;
+            }
+            catch
+            {
+                return path.Trim().TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            }
         }
 
         private sealed class DriveOption
         {
             public string RootPath { get; }
             public string DisplayText { get; }
+            public bool IsUsed { get; }
+            public bool IsSelectable => !IsUsed;
 
-            public DriveOption(DriveInfo drive)
+            public DriveOption(DriveInfo drive, bool isUsed)
             {
                 RootPath = drive.RootDirectory.FullName;
+                IsUsed = isUsed;
                 string name = string.IsNullOrWhiteSpace(drive.VolumeLabel) ? "本地磁盘" : drive.VolumeLabel;
                 double freeGb = drive.AvailableFreeSpace / 1073741824.0;
                 double totalGb = drive.TotalSize / 1073741824.0;
-                DisplayText = $"{drive.Name} {name}  可用 {freeGb:F1} / {totalGb:F1} GB";
+                string status = isUsed ? "  使用中" : "";
+                DisplayText = $"{drive.Name} {name}  可用 {freeGb:F1} / {totalGb:F1} GB{status}";
             }
         }
     }
