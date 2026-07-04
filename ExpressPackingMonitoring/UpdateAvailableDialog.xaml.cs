@@ -15,7 +15,9 @@ namespace ExpressPackingMonitoring
             TitleText.Text = string.IsNullOrWhiteSpace(result.Title)
                 ? "更新标题：未填写"
                 : $"更新标题：{result.Title}";
-            BodyViewer.Document = MarkdownFlowDocumentRenderer.Render(result.Body);
+            var document = MarkdownFlowDocumentRenderer.Render(result.Body);
+            document.FontFamily = BodyViewer.FontFamily;
+            BodyViewer.Document = document;
         }
 
         private void Download_Click(object sender, RoutedEventArgs e)

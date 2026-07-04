@@ -34,7 +34,7 @@ namespace ExpressPackingMonitoring
 
                 if (Regex.IsMatch(line.Trim(), @"^-{3,}$"))
                 {
-                    document.Blocks.Add(new Paragraph(new Run("────────────")) { Margin = new Thickness(0, 8, 0, 8) });
+                    document.Blocks.Add(new Paragraph(new Run("------------")) { Margin = new Thickness(0, 8, 0, 8) });
                     continue;
                 }
 
