@@ -189,6 +189,28 @@ namespace ExpressPackingMonitoring.Config
                 changed = true;
             }
 
+            if (config.StorageLocations == null)
+            {
+                config.StorageLocations = new List<StorageLocation>();
+                changed = true;
+            }
+
+            if (config.StorageLocations.Count == 0)
+            {
+                config.StorageLocations.Add(new StorageLocation());
+                changed = true;
+            }
+
+            foreach (var location in config.StorageLocations)
+            {
+                double normalizedReserveGB = StorageSpacePolicy.NormalizeReserveGB(location.Path, location.ReserveGB);
+                if (System.Math.Abs(location.ReserveGB - normalizedReserveGB) > 0.001)
+                {
+                    location.ReserveGB = normalizedReserveGB;
+                    changed = true;
+                }
+            }
+
             int normalizedMinLength = System.Math.Clamp(config.ScannerAutoSubmitMinLength, 4, 30);
             if (config.ScannerAutoSubmitMinLength != normalizedMinLength)
             {

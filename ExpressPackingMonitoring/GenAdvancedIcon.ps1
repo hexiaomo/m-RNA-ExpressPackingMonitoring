@@ -137,5 +137,6 @@ public class AdvancedIconGenerator {
 "@
 
 Add-Type -TypeDefinition $source -ReferencedAssemblies System.Drawing
-[AdvancedIconGenerator]::BuildIcon("C:\Users\Administrator\Documents\OpenSourceProject\ExpressPackingMonitoring\ExpressPackingMonitoring\app.ico")
+$outputPath = Join-Path $PSScriptRoot "app.ico"
+[AdvancedIconGenerator]::BuildIcon($outputPath)
 Write-Host "Multi-resolution icon correctly generated with zero compilation errors expected."

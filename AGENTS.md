@@ -5,7 +5,7 @@
 - `ExpressPackingMonitoring.sln` is the main solution.
 - `ExpressPackingMonitoring/` contains the WPF application, including XAML views, view models, services, SQLite access, recording logic, and `Web/index.html`.
 - `ExpressPackingMonitoring.Launcher/` contains the small launcher executable used by the clean package layout.
-- `build/Publish-CleanPackage.ps1` creates the distributable directory and zip package.
+- `Tools/Publish-CleanPackage.ps1` creates the distributable directory, full zip, update manifest, launcher manifest, and optional AppPatch package.
 - `Scripts/快递助手订单推送.user.js` is the browser userscript for order push integration.
 - `Image/` stores README and project screenshots. `Test/HTML/` contains captured sample pages for script/debug reference, not an automated test suite.
 
@@ -15,13 +15,13 @@
 dotnet restore ExpressPackingMonitoring.sln
 dotnet build ExpressPackingMonitoring.sln -c Debug
 dotnet run --project ExpressPackingMonitoring
-powershell -ExecutionPolicy Bypass -File build\Publish-CleanPackage.ps1
+powershell -ExecutionPolicy Bypass -File Tools\Publish-CleanPackage.ps1
 ```
 
 - `restore` downloads NuGet dependencies.
 - `build` verifies the WPF app and launcher compile.
 - `run` starts the main app locally.
-- `Publish-CleanPackage.ps1` produces the clean release layout with the root launcher and `app\` payload.
+- `Tools\Publish-CleanPackage.ps1` produces the clean release layout with the root launcher and `app\` payload.
 
 ## Runtime and Distribution Notes
 
@@ -32,6 +32,20 @@ powershell -ExecutionPolicy Bypass -File build\Publish-CleanPackage.ps1
 - `ffmpeg.exe` may be resolved from `app\tools\ffmpeg.exe`, the application runtime directory, or the system `PATH`.
 - `Scripts/快递助手订单推送.user.js` is the browser userscript used for order push integration.
 - Edge TTS is the default online voice path. Kokoro local TTS models and runtime dependencies are optional and should not be bundled unless explicitly intended.
+
+## Update & Release Workflow
+
+- Users should start the root launcher. The launcher starts the app immediately, checks updates in the background, downloads verified AppPatch packages into `%LOCALAPPDATA%\ExpressPackingMonitoring\cache\updates`, and installs pending patches on the next launcher run.
+- The launcher must not update itself. If launcher source or project configuration changes, disable AppPatch for that release and require a full package update.
+- AppPatch packages are fixed-baseline cumulative patches. The default patch baseline is `0.0.18`, but scripts may allow overriding it when a new formal baseline is chosen.
+- Keep update URLs configurable through environment variables or `.env`. The default update check URL is GitHub releases latest API; `.env` may point to another release provider.
+- Do not generate AppFull packages. Release uploads normally include the full zip, `update_vX.Y.Z.json`, optional `ExpressPackingMonitoring_AppPatch_vX.Y.Z.zip`, and `launcher_manifest_vX.Y.Z.json`.
+
+## Storage, Cache, and Web Video
+
+- Storage settings are expressed as reserved free space for the system and other apps, not as a recording quota. Keep `StorageSpacePolicy` as the single source of truth for minimum reserve rules.
+- Cache-like Web artifacts, including transcode cache, clip previews, and clipped downloads, live under `%LOCALAPPDATA%\ExpressPackingMonitoring\cache` and are cleaned by the Web cache limit.
+- Web clipping is named “剪辑” / “剪辑并下载”. Do not call it “导出视频”, which can be confused with original video download.
 
 ## Coding Style & Naming Conventions
 

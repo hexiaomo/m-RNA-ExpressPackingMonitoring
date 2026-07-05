@@ -28,6 +28,11 @@
     const DISCOVERY_TIMEOUT = 700;
     const DISCOVERY_BATCH_SIZE = 32;
     const CHANGELOG = 'v1.3：合并上位机地址和端口设置，统一 127.x 回环地址为 127.0.0.1';
+    const DEBUG_LOG = false;
+
+    function debugLog(...args) {
+        if (DEBUG_LOG) console.log(...args);
+    }
 
     function getApiUrl() { return `${getBaseUrl(getMonitorAddressText())}/api/orderinfo`; }
     function getStorageUrl(host, port) { return `${getBaseUrl(host, port)}/api/storage`; }
@@ -331,7 +336,7 @@
                 onload: function (res) {
                     const response = parseJsonResponse(res.responseText);
                     if (res.status === 200) {
-                        console.log(`[打包监控] 推送成功: ${orders.length} 条`, response);
+                        debugLog(`[打包监控] 推送成功: ${orders.length} 条`, response);
                         const confirmed = !options.isTest || Number(response.testCount || 0) > 0;
                         if (options.isTest) {
                             showNotification(confirmed ? '监控工位已收到测试订单' : '测试订单已发送，请查看监控端是否播报');
@@ -421,11 +426,11 @@
         btnContainer.addEventListener('click', (e) => {
             const btn = e.target.closest('input[type="button"], button, .btn_bluebig, .btn_pinkbig, .btn_cyanbig, .btn_graybig');
             if (btn) {
-                console.log('[打包监控] 检测到操作按钮点击:', btn.value || btn.textContent?.trim());
+                debugLog('[打包监控] 检测到操作按钮点击:', btn.value || btn.textContent?.trim());
                 schedulePush();
             }
         });
-        console.log('[打包监控] 操作按钮监听已绑定');
+        debugLog('[打包监控] 操作按钮监听已绑定');
     }
 
     // 监听订单列表区域的 DOM 变化（放宽范围：监听整个容器或 body）
@@ -440,7 +445,7 @@
                             node.tagName === 'TBODY' ||
                             node.tagName === 'TABLE' ||
                             node.classList?.contains('dfdd_container')) {
-                            console.log('[打包监控] 检测到订单DOM变化，准备推送');
+                            debugLog('[打包监控] 检测到订单DOM变化，准备推送');
                             schedulePush();
                             return;
                         }
@@ -449,7 +454,7 @@
             }
             // 也监听子节点批量替换（如翻页时 innerHTML 整体替换）
             if (m.removedNodes.length > 0 && m.addedNodes.length > 0) {
-                console.log('[打包监控] 检测到DOM子节点替换，准备推送');
+                debugLog('[打包监控] 检测到DOM子节点替换，准备推送');
                 schedulePush();
                 return;
             }
@@ -463,7 +468,7 @@
                        document.querySelector('.packageItem')?.closest('table')?.parentElement ||
                        document.body;
         observer.observe(target, { childList: true, subtree: true });
-        console.log('[打包监控] DOM 监听已启动, 目标:', target.tagName, target.className || '(body)');
+        debugLog('[打包监控] DOM 监听已启动, 目标:', target.tagName, target.className || '(body)');
         // 绑定操作按钮监听
         bindActionButtons();
         ensureMonitorAddress(true);
@@ -471,5 +476,5 @@
         extractAndPush();
     }, 3000);
 
-    console.log('[打包监控] 油猴脚本已加载', CHANGELOG);
+    debugLog('[打包监控] 油猴脚本已加载', CHANGELOG);
 })();

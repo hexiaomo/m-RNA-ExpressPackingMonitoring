@@ -865,10 +865,15 @@ namespace ExpressPackingMonitoring.ViewModels
 
         private void LoadConfig() 
         { 
+            bool containsRemovedStorageQuota = false;
             try 
             { 
                 if (File.Exists(_configFilePath)) 
-                    Config = JsonSerializer.Deserialize<AppConfig>(File.ReadAllText(_configFilePath)) ?? new AppConfig(); 
+                {
+                    string configJson = File.ReadAllText(_configFilePath);
+                    containsRemovedStorageQuota = configJson.Contains("\"QuotaGB\"", StringComparison.OrdinalIgnoreCase);
+                    Config = JsonSerializer.Deserialize<AppConfig>(configJson) ?? new AppConfig();
+                }
                 else 
                 { 
                     Config = new AppConfig(); 
@@ -877,14 +882,29 @@ namespace ExpressPackingMonitoring.ViewModels
             } 
             catch { Config = new AppConfig(); } 
 
+            bool configMigrated = containsRemovedStorageQuota;
             if (Config.VideoCqp <= 0)
+            {
                 Config.VideoCqp = 25;
+                configMigrated = true;
+            }
             if (Config.AudioSyncOffsetMs == 400)
+            {
                 Config.AudioSyncOffsetMs = 0;
+                configMigrated = true;
+            }
             if (!WorkstationRoles.IsKnown(Config.WorkstationRole))
+            {
                 Config.WorkstationRole = WorkstationRoles.CameraMonitor;
-            Config.AudioSyncOffsetMs = Math.Clamp(Config.AudioSyncOffsetMs, -5000, 5000);
-            bool configMigrated = AppConfig.NormalizeAfterLoad(Config);
+                configMigrated = true;
+            }
+            int normalizedAudioSyncOffsetMs = Math.Clamp(Config.AudioSyncOffsetMs, -5000, 5000);
+            if (Config.AudioSyncOffsetMs != normalizedAudioSyncOffsetMs)
+            {
+                Config.AudioSyncOffsetMs = normalizedAudioSyncOffsetMs;
+                configMigrated = true;
+            }
+            configMigrated = AppConfig.NormalizeAfterLoad(Config) || configMigrated;
             if (configMigrated)
                 SaveConfig();
 
