@@ -5,7 +5,9 @@ param(
     [string]$ZipPath = "",
     [string]$Version = "",
     [string]$BaselineAppDir = "",
-    [string]$PatchBaselineVersion = "0.0.15",
+    [string]$BaselineLauncherPath = "",
+    [string]$BaselineLauncherManifestPath = "",
+    [string]$PatchBaselineVersion = "0.0.16",
     [switch]$DisablePatch
 )
 
@@ -196,6 +198,96 @@ function ConvertFrom-Utf8Base64 {
     return [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($Value))
 }
 
+function Get-DotEnvValue {
+    param([string]$Key)
+
+    $paths = @(
+        (Join-Path $repoRoot ".env"),
+        (Join-Path $repoRoot "ExpressPackingMonitoring.Launcher\.env"),
+        (Join-Path $repoRoot "ExpressPackingMonitoring\.env")
+    )
+
+    foreach ($path in $paths) {
+        if (-not (Test-Path $path)) {
+            continue
+        }
+
+        foreach ($line in [System.IO.File]::ReadAllLines($path, [System.Text.Encoding]::UTF8)) {
+            $trimmed = $line.Trim()
+            if ([string]::IsNullOrWhiteSpace($trimmed) -or $trimmed.StartsWith("#")) {
+                continue
+            }
+
+            $separatorIndex = $trimmed.IndexOf("=")
+            if ($separatorIndex -le 0) {
+                continue
+            }
+
+            $name = $trimmed.Substring(0, $separatorIndex).Trim()
+            if (-not [string]::Equals($name, $Key, [System.StringComparison]::OrdinalIgnoreCase)) {
+                continue
+            }
+
+            $value = $trimmed.Substring($separatorIndex + 1).Trim()
+            if (($value.StartsWith('"') -and $value.EndsWith('"')) -or
+                ($value.StartsWith("'") -and $value.EndsWith("'"))) {
+                $value = $value.Substring(1, $value.Length - 2)
+            }
+
+            return $value
+        }
+    }
+
+    return ""
+}
+
+function Get-ConfiguredValue {
+    param(
+        [string]$Key,
+        [string]$DefaultValue
+    )
+
+    $envValue = [Environment]::GetEnvironmentVariable($Key)
+    if (-not [string]::IsNullOrWhiteSpace($envValue)) {
+        return $envValue.Trim()
+    }
+
+    $dotEnvValue = Get-DotEnvValue -Key $Key
+    if (-not [string]::IsNullOrWhiteSpace($dotEnvValue)) {
+        return $dotEnvValue.Trim()
+    }
+
+    return $DefaultValue
+}
+
+function Get-ReleaseUrlBase {
+    $explicitBase = Get-ConfiguredValue -Key "RELEASE_URL_BASE" -DefaultValue ""
+    if (-not [string]::IsNullOrWhiteSpace($explicitBase)) {
+        return $explicitBase.TrimEnd("/")
+    }
+
+    $checkUrl = Get-ConfiguredValue -Key "UPDATE_CHECK_URL" -DefaultValue "https://api.github.com/repos/m-RNA/ExpressPackingMonitoring/releases/latest"
+    if ($checkUrl -match "^https://api\.github\.com/repos/([^/]+/[^/]+)/releases/latest/?$") {
+        return "https://github.com/$($Matches[1])/releases"
+    }
+
+    if ($checkUrl -match "^https://gitee\.com/api/v5/repos/([^/]+/[^/]+)/releases/latest/?$") {
+        return "https://gitee.com/$($Matches[1])/releases"
+    }
+
+    return "https://github.com/m-RNA/ExpressPackingMonitoring/releases"
+}
+
+function Expand-ReleaseTemplate {
+    param(
+        [string]$Template,
+        [string]$ReleaseTag,
+        [string]$FileName
+    )
+
+    return $Template.Replace("{tag}", $ReleaseTag).Replace("{file}", $FileName)
+}
+
 function Get-RelativePath {
     param(
         [string]$BaseDir,
@@ -221,6 +313,49 @@ function Copy-FilePreservingRelativePath {
     }
 
     Copy-Item -LiteralPath $SourceFile -Destination $target -Force
+}
+
+function Get-LauncherSourceFingerprint {
+    param([string[]]$RelativePaths)
+
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        foreach ($relativePath in $RelativePaths) {
+            $normalizedPath = $relativePath.Replace('\', '/')
+            $pathBytes = [System.Text.Encoding]::UTF8.GetBytes($normalizedPath)
+            $sha.TransformBlock($pathBytes, 0, $pathBytes.Length, $null, 0) | Out-Null
+            $separator = [byte[]](0)
+            $sha.TransformBlock($separator, 0, $separator.Length, $null, 0) | Out-Null
+
+            $fullPath = Join-Path $repoRoot $relativePath
+            if (-not (Test-Path $fullPath)) {
+                throw "Launcher fingerprint file missing: $relativePath"
+            }
+
+            $content = [System.IO.File]::ReadAllBytes($fullPath)
+            $sha.TransformBlock($content, 0, $content.Length, $null, 0) | Out-Null
+            $sha.TransformBlock($separator, 0, $separator.Length, $null, 0) | Out-Null
+        }
+
+        $emptyBytes = New-Object byte[] 0
+        $sha.TransformFinalBlock($emptyBytes, 0, 0) | Out-Null
+        return [System.BitConverter]::ToString($sha.Hash).Replace("-", "").ToLowerInvariant()
+    }
+    finally {
+        $sha.Dispose()
+    }
+}
+
+function Read-LauncherFingerprintFromManifest {
+    param([string]$ManifestPath)
+
+    try {
+        $manifest = Get-Content -Raw -Encoding UTF8 $ManifestPath | ConvertFrom-Json
+        return [string]$manifest.launcher_source_fingerprint
+    }
+    catch {
+        return ""
+    }
 }
 
 function New-AppPatchPackage {
@@ -266,6 +401,11 @@ function New-AppPatchPackage {
                 "size" = $_.Length
             }
         }
+    }
+
+    if ($changedFiles.Count -eq 0) {
+        Remove-Item -LiteralPath $patchWorkDir -Recurse -Force
+        throw "AppPatch package has no changed files. Check BaselineAppDir or disable patch for this release."
     }
 
     $patchManifest = [ordered]@{}
@@ -342,10 +482,15 @@ $appPatchZipName = "ExpressPackingMonitoring_AppPatch_$releaseTag.zip"
 $appPatchZipPath = Join-Path $packageRoot $appPatchZipName
 $updateJsonName = "update_$releaseTag.json"
 $updateJsonPath = Join-Path $packageRoot $updateJsonName
+$launcherManifestName = "launcher_manifest_$releaseTag.json"
+$launcherManifestPath = Join-Path $packageRoot $launcherManifestName
 $releaseInfoName = "release_info_$releaseTag.txt"
 $releaseInfoPath = Join-Path $packageRoot $releaseInfoName
-$releasePage = "https://gitee.com/chenjjian/ExpressPackingMonitoring/releases/tag/$releaseTag"
-$appPatchPlaceholderUrl = "https://gitee.com/chenjjian/ExpressPackingMonitoring/releases/download/$releaseTag/$appPatchZipName"
+$releaseUrlBase = Get-ReleaseUrlBase
+$releasePageTemplate = Get-ConfiguredValue -Key "RELEASE_PAGE_URL_TEMPLATE" -DefaultValue "$releaseUrlBase/tag/{tag}"
+$appPatchUrlTemplate = Get-ConfiguredValue -Key "APP_PATCH_URL_TEMPLATE" -DefaultValue "$releaseUrlBase/download/{tag}/{file}"
+$releasePage = Expand-ReleaseTemplate -Template $releasePageTemplate -ReleaseTag $releaseTag -FileName $appPatchZipName
+$appPatchPlaceholderUrl = Expand-ReleaseTemplate -Template $appPatchUrlTemplate -ReleaseTag $releaseTag -FileName $appPatchZipName
 
 New-Item -ItemType Directory -Force -Path $packageRoot | Out-Null
 if (Test-Path $legacyAppFullZipPath) {
@@ -359,12 +504,56 @@ $patchSupported = $false
 $patchReason = ""
 $appPatchHash = ""
 $appPatchSize = 0
+$launcherChanged = $false
+$launcherPatchBlocked = $false
+$launcherCheckInfo = ""
+$launcherProtocolVersion = "1"
+$launcherFingerprintFiles = @(
+    "ExpressPackingMonitoring.Launcher\Program.cs",
+    "ExpressPackingMonitoring.Launcher\ExpressPackingMonitoring.Launcher.csproj"
+)
+$launcherSourceFingerprint = Get-LauncherSourceFingerprint -RelativePaths $launcherFingerprintFiles
+$launcherManifest = [ordered]@{}
+$launcherManifest["version"] = $normalizedVersion
+$launcherManifest["launcher_update_protocol_version"] = $launcherProtocolVersion
+$launcherManifest["launcher_source_fingerprint"] = $launcherSourceFingerprint
+$launcherManifest["fingerprint_files"] = @($launcherFingerprintFiles | ForEach-Object { $_.Replace('\', '/') })
+$launcherManifest |
+    ConvertTo-Json -Depth 5 |
+    Set-Content -LiteralPath $launcherManifestPath -Encoding UTF8
+
+if ([string]::IsNullOrWhiteSpace($BaselineLauncherManifestPath)) {
+    $launcherCheckInfo = ConvertFrom-Utf8Base64 "5pyq5qCh6aqM5ZCv5Yqo5Zmo5rqQ56CB5oyH57q577yM6K+356Gu6K6k5pys54mI5pys5pyq5L+u5pS55ZCv5Yqo5Zmo44CC"
+}
+elseif (-not (Test-Path $BaselineLauncherManifestPath)) {
+    $launcherCheckInfo = ConvertFrom-Utf8Base64 "QmFzZWxpbmVMYXVuY2hlck1hbmlmZXN0UGF0aCDot6/lvoTkuI3lrZjlnKjvvIzlt7LnpoHnlKjlop7ph4/mm7TmlrDjgII="
+    $patchReason = ConvertFrom-Utf8Base64 "5pyq55Sf5oiQ5aKe6YeP5YyF77yaQmFzZWxpbmVMYXVuY2hlck1hbmlmZXN0UGF0aCDot6/lvoTkuI3lrZjlnKjjgII="
+    $launcherPatchBlocked = $true
+}
+else {
+    $baselineLauncherFingerprint = Read-LauncherFingerprintFromManifest -ManifestPath $BaselineLauncherManifestPath
+    $launcherChanged = [string]::IsNullOrWhiteSpace($baselineLauncherFingerprint) -or
+        -not [string]::Equals($launcherSourceFingerprint, $baselineLauncherFingerprint, [System.StringComparison]::OrdinalIgnoreCase)
+    if ($launcherChanged) {
+        $launcherCheckInfo = ConvertFrom-Utf8Base64 "5ZCv5Yqo5Zmo5rqQ56CB5oyH57q55bey5Y+Y5YyW77yM5bey56aB55So5aKe6YeP5pu05paw44CC"
+        $patchReason = ConvertFrom-Utf8Base64 "5pyq55Sf5oiQ5aKe6YeP5YyF77ya5ZCv5Yqo5Zmo5rqQ56CB5oyH57q55bey5Y+Y5YyW77yM6K+35omL5Yqo5LiL6L295a6M5pW05YyF44CC"
+        $launcherPatchBlocked = $true
+    }
+    else {
+        $launcherCheckInfo = ConvertFrom-Utf8Base64 "5ZCv5Yqo5Zmo5rqQ56CB5oyH57q55bey6YCa6L+H77yM5ZCv5Yqo5Zmo5pyq5Y+Y5YyW44CC"
+    }
+}
+if (-not [string]::IsNullOrWhiteSpace($BaselineLauncherPath)) {
+    $launcherCheckInfo += [Environment]::NewLine + (ConvertFrom-Utf8Base64 "QmFzZWxpbmVMYXVuY2hlclBhdGgg5bey5bqf5byD77yM6K+35pS555SoIEJhc2VsaW5lTGF1bmNoZXJNYW5pZmVzdFBhdGjjgII=")
+}
 
 if ($DisablePatch) {
     $patchReason = ConvertFrom-Utf8Base64 "5pyq55Sf5oiQ5aKe6YeP5YyF77ya5bey5Lyg5YWlIERpc2FibGVQYXRjaOOAgg=="
 }
 elseif ([string]::IsNullOrWhiteSpace($BaselineAppDir) -or -not (Test-Path $BaselineAppDir)) {
     $patchReason = ConvertFrom-Utf8Base64 "5pyq55Sf5oiQ5aKe6YeP5YyF77ya5pyq5Lyg5YWlIEJhc2VsaW5lQXBwRGlyIOaIlui3r+W+hOS4jeWtmOWcqOOAgg=="
+}
+elseif ($launcherPatchBlocked) {
 }
 else {
     New-AppPatchPackage `
@@ -403,9 +592,12 @@ if ($patchSupported) {
 }
 else {
     $updateManifest["patch_package"] = $null
-    $updateManifest["notes"] = @(
-        (ConvertFrom-Utf8Base64 "5pys54mI5pys5LiN5pSv5oyB6Ieq5Yqo5aKe6YeP5pu05paw77yM6K+35omL5Yqo5LiL6L295a6M5pW05YyF44CC")
-    )
+    $updateManifest["notes"] = if ($launcherChanged) {
+        @((ConvertFrom-Utf8Base64 "5pys54mI5pys5YyF5ZCr5ZCv5Yqo5Zmo5pu05paw77yM6K+35omL5Yqo5LiL6L295a6M5pW05YyF44CC"))
+    }
+    else {
+        @((ConvertFrom-Utf8Base64 "5pys54mI5pys5LiN5pSv5oyB6Ieq5Yqo5aKe6YeP5pu05paw77yM6K+35omL5Yqo5LiL6L295a6M5pW05YyF44CC"))
+    }
 }
 $updateManifest["full_download_page"] = $releasePage
 
@@ -413,38 +605,32 @@ $updateManifest |
     ConvertTo-Json -Depth 6 |
     Set-Content -LiteralPath $updateJsonPath -Encoding UTF8
 
-$statePath = Join-Path $outputFullPath "update_state.json"
-$updateState = [ordered]@{}
-$updateState["current_version"] = $normalizedVersion
-$updateState["auto_check_update"] = $true
-$updateState |
-    ConvertTo-Json -Depth 3 |
-    Set-Content -LiteralPath $statePath -Encoding UTF8
-
 $patchReleaseInfo = if ($patchSupported) { $appPatchZipName } else { $patchReason }
-$releaseInfoLines = @(
-    (ConvertFrom-Utf8Base64 "R2l0SHViIFJlbGVhc2Ug5LiK5Lyg5riF5Y2V"),
-    "",
-    ((ConvertFrom-Utf8Base64 "54mI5pys77ya") + $releaseTag),
-    ((ConvertFrom-Utf8Base64 "UmVsZWFzZSDpobXpnaLvvJo=") + $releasePage),
-    "",
-    (ConvertFrom-Utf8Base64 "6ZyA6KaB5LiK5Lyg77ya"),
-    ((ConvertFrom-Utf8Base64 "MS4g5a6M5pW05YyFIHppcO+8mg==") + (Split-Path -Leaf $zipFullPath)),
-    ((ConvertFrom-Utf8Base64 "QXBwUGF0Y2gg5YyF77ya") + $patchReleaseInfo),
-    ((ConvertFrom-Utf8Base64 "My4g5pu05paw5o+P6L+w5paH5Lu277ya") + $updateJsonName),
-    "",
-    ((ConvertFrom-Utf8Base64 "5LiK5Lyg5ZCO6K+35qOA5p+lIA==") + $updateJsonName + (ConvertFrom-Utf8Base64 "IOS4reeahCBwYXRjaF9wYWNrYWdlLnVybCDmmK/lkKbkuI4gR2l0ZWUgUmVsZWFzZSDpmYTku7bkuIvovb3lnLDlnYDkuIDoh7TjgII=")),
-    "",
-    ((ConvertFrom-Utf8Base64 "UGF0Y2gg5Z+657q/54mI5pys77ya") + $normalizedPatchBaselineVersion)
-)
+$releaseInfoCheckLine = (ConvertFrom-Utf8Base64 "5LiK5Lyg5ZCO6K+35qOA5p+lIA==") + $updateJsonName + (ConvertFrom-Utf8Base64 "IOmHjOeahCBwYXRjaF9wYWNrYWdlLnVybCDmmK/lkKbkuI4gUmVsZWFzZSDpmYTku7bkuIvovb3lnLDlnYDkuIDoh7TjgII=")
+$patchBaselineInfoLine = (ConvertFrom-Utf8Base64 "UGF0Y2gg5Z+657q/54mI5pys77ya") + $normalizedPatchBaselineVersion
+$releaseInfoLines = @()
+$releaseInfoLines += ConvertFrom-Utf8Base64 "UmVsZWFzZSDkuIrkvKDmuIXljZU="
+$releaseInfoLines += ""
+$releaseInfoLines += (ConvertFrom-Utf8Base64 "54mI5pys77ya") + $releaseTag
+$releaseInfoLines += (ConvertFrom-Utf8Base64 "UmVsZWFzZSDpobXpnaLvvJo=") + $releasePage
+$releaseInfoLines += ""
+$releaseInfoLines += ConvertFrom-Utf8Base64 "6ZyA6KaB5LiK5Lyg77ya"
+$releaseInfoLines += (ConvertFrom-Utf8Base64 "MS4g5a6M5pW05YyFIHppcO+8mg==") + (Split-Path -Leaf $zipFullPath)
+$releaseInfoLines += (ConvertFrom-Utf8Base64 "QXBwUGF0Y2gg5YyF77ya") + $patchReleaseInfo
+$releaseInfoLines += (ConvertFrom-Utf8Base64 "My4g5pu05paw5o+P6L+w5paH5Lu277ya") + $updateJsonName
+$releaseInfoLines += "4. launcher manifest: " + $launcherManifestName
+$releaseInfoLines += ""
+$releaseInfoLines += $releaseInfoCheckLine
+$releaseInfoLines += ""
+$releaseInfoLines += $launcherCheckInfo
+$releaseInfoLines += ""
+$releaseInfoLines += $patchBaselineInfoLine
 if ($patchSupported) {
-    $releaseInfoLines += @(
-        "AppPatch SHA256:",
-        $appPatchHash,
-        "",
-        "AppPatch size:",
-        "$appPatchSize bytes"
-    )
+    $releaseInfoLines += "AppPatch SHA256:"
+    $releaseInfoLines += $appPatchHash
+    $releaseInfoLines += ""
+    $releaseInfoLines += "AppPatch size:"
+    $releaseInfoLines += "$appPatchSize bytes"
 }
 $releaseInfo = $releaseInfoLines -join [Environment]::NewLine
 $releaseInfo | Set-Content -LiteralPath $releaseInfoPath -Encoding UTF8

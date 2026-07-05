@@ -25,7 +25,6 @@ namespace ExpressPackingMonitoring.Services
     public sealed class UpdateCheckService
     {
         private static readonly TimeSpan ManualDebounce = TimeSpan.FromSeconds(300);
-        private static readonly TimeSpan AutoCheckInterval = TimeSpan.FromDays(1);
         private static readonly JsonSerializerOptions JsonOptions = new()
         {
             WriteIndented = true
@@ -42,18 +41,6 @@ namespace ExpressPackingMonitoring.Services
             if (TryGetCachedResult(cache, ManualDebounce, out UpdateCheckResult cached))
             {
                 RuntimeLog.Info("Update", "Manual update check debounced, using cached success result");
-                return cached;
-            }
-
-            return await CheckAndCacheAsync(cache, cancellationToken);
-        }
-
-        public async Task<UpdateCheckResult> CheckAutomaticAsync(CancellationToken cancellationToken = default)
-        {
-            UpdateCheckCache? cache = LoadCache();
-            if (TryGetCachedResult(cache, AutoCheckInterval, out UpdateCheckResult cached))
-            {
-                RuntimeLog.Info("Update", "Automatic update check skipped, using cached success result");
                 return cached;
             }
 

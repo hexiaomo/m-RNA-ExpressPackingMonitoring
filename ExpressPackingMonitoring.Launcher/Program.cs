@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.IO.Compression;
+using System.IO.Pipes;
 using System.Net.Http;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
@@ -9,13 +10,18 @@ using System.Text.Json;
 internal static class Program
 {
     private const string AppRelativePath = "app\\ExpressPackingMonitoring.exe";
-    private const string UpdatesDirName = "updates";
-    private const string StagingDirName = "staging";
-    private const string BackupDirName = "backup";
-    private const string StateFileName = "update_state.json";
-    private const string LogFileName = "update.log";
+    private const string AppDllRelativePath = "app\\ExpressPackingMonitoring.dll";
     private const string UpdateUrlKey = "UPDATE_CHECK_URL";
     private const string DefaultCheckUrl = "https://api.github.com/repos/m-RNA/ExpressPackingMonitoring/releases/latest";
+    private const string PatchPackageType = "baseline_patch";
+    private const string UpdateMutexName = @"Local\ExpressPackingMonitoring.Launcher.Update";
+    private const string InstanceNamePrefix = "ExpressPackingMonitoring";
+    private const string CameraMonitorRole = "CameraMonitor";
+    private const string PrintStationRole = "PrintStation";
+    private static readonly TimeSpan NetworkUpdateTimeout = TimeSpan.FromSeconds(75);
+    private const uint InfoIcon = 0x00000040;
+    private const uint ErrorIcon = 0x00000010;
+    private const uint DialogTimeoutMs = 10000;
 
     private static readonly HttpClient HttpClient = new()
     {
@@ -26,114 +32,332 @@ internal static class Program
     private static int Main(string[] args)
     {
         string baseDir = AppContext.BaseDirectory;
-        CheckAndInstallPatchUpdateAsync(baseDir).GetAwaiter().GetResult();
-
         string appPath = Path.Combine(baseDir, AppRelativePath);
-        return StartApp(baseDir, appPath, args);
+        bool appAlreadyRunning = IsAppRunning(appPath);
+        bool hasPendingUpdate = HasPendingUpdate();
+        UpdateNotification? notification = appAlreadyRunning ? null : RunExclusivePendingInstall(baseDir);
+
+        if (appAlreadyRunning)
+        {
+            if (!TryActivateExistingApp(args))
+            {
+                int startResult = StartApp(baseDir, appPath, args);
+                if (startResult != 0)
+                    return startResult;
+            }
+        }
+        else
+        {
+            int startResult = StartApp(baseDir, appPath, args);
+            if (startResult != 0)
+                return startResult;
+        }
+
+        Thread? backgroundUpdateThread = null;
+        if (notification == null && !hasPendingUpdate)
+            backgroundUpdateThread = StartBackgroundUpdateDownload(baseDir);
+
+        Thread? notificationThread = null;
+        if (notification != null)
+        {
+            notificationThread = ShowTimedMessageAsync(
+                notification.Message,
+                notification.IsError ? ErrorIcon : InfoIcon);
+        }
+
+        backgroundUpdateThread?.Join();
+        notificationThread?.Join();
+        return 0;
     }
 
-    private static async Task CheckAndInstallPatchUpdateAsync(string baseDir)
+    private static UpdateNotification? RunExclusivePendingInstall(string baseDir)
     {
+        return RunExclusiveUpdateWork("pending 安装", () =>
+        {
+            try
+            {
+                return InstallPendingUpdate(baseDir);
+            }
+            catch (Exception ex)
+            {
+                WriteLog("安装 pending 更新失败：" + ex);
+                return null;
+            }
+        });
+    }
+
+    private static Thread StartBackgroundUpdateDownload(string baseDir)
+    {
+        var thread = new Thread(() =>
+        {
+            UpdateNotification? notification = RunExclusiveUpdateDownload(baseDir);
+            if (notification != null)
+            {
+                Thread notificationThread = ShowTimedMessageAsync(
+                    notification.Message,
+                    notification.IsError ? ErrorIcon : InfoIcon);
+                notificationThread.Join();
+            }
+        });
+
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.IsBackground = false;
+        thread.Start();
+        return thread;
+    }
+
+    private static UpdateNotification? RunExclusiveUpdateDownload(string baseDir)
+    {
+        return RunExclusiveUpdateWork("后台下载", () =>
+        {
+            using var cts = new CancellationTokenSource(NetworkUpdateTimeout);
+            return CheckAndDownloadPatchUpdateAsync(baseDir, cts.Token).GetAwaiter().GetResult();
+        });
+    }
+
+    private static UpdateNotification? RunExclusiveUpdateWork(
+        string operationName,
+        Func<UpdateNotification?> work)
+    {
+        bool hasLock = false;
+
         try
         {
-            UpdateState state = LoadState(baseDir);
-            if (!state.AutoCheckUpdate)
-                return;
-
-            string checkUrl = GetUpdateCheckUrl(baseDir);
-            if (string.IsNullOrWhiteSpace(checkUrl))
-                return;
-
-            using JsonDocument release = await GetJsonAsync(checkUrl);
-            JsonElement releaseRoot = release.RootElement;
-            string tagName = ReadString(releaseRoot, "tag_name");
-            if (string.IsNullOrWhiteSpace(tagName))
-                return;
-
-            string latestVersion = NormalizeVersion(tagName);
-            if (CompareVersions(latestVersion, state.CurrentVersion) <= 0)
-                return;
-
-            AssetInfo? manifestAsset = FindUpdateManifestAsset(releaseRoot, latestVersion);
-            if (manifestAsset == null)
-                return;
-
-            using JsonDocument updateManifest = await GetJsonAsync(manifestAsset.Url);
-            JsonElement updateRoot = updateManifest.RootElement;
-            string fullDownloadPage = ReadString(updateRoot, "full_download_page");
-            if (string.IsNullOrWhiteSpace(fullDownloadPage))
-                fullDownloadPage = ReadString(updateRoot, "release_page");
-
-            string baselineVersion = NormalizeVersion(ReadString(updateRoot, "patch_baseline_version"));
-            if (!ReadBoolean(updateRoot, "patch_supported"))
+            using var mutex = new Mutex(initiallyOwned: false, UpdateMutexName);
+            try
             {
-                PromptFullUpdate("本版本需要完整更新，请手动下载完整包。", fullDownloadPage);
-                return;
-            }
+                try
+                {
+                    hasLock = mutex.WaitOne(TimeSpan.Zero);
+                }
+                catch (AbandonedMutexException)
+                {
+                    hasLock = true;
+                }
 
-            if (!string.IsNullOrWhiteSpace(baselineVersion) &&
-                CompareVersions(state.CurrentVersion, baselineVersion) < 0)
+                if (!hasLock)
+                {
+                    WriteLog($"检测到另一个启动器正在处理更新，跳过本次{operationName}");
+                    return null;
+                }
+
+                return work();
+            }
+            finally
             {
-                PromptFullUpdate("当前版本过旧，需要手动下载完整包。", fullDownloadPage);
-                return;
+                if (hasLock)
+                {
+                    try
+                    {
+                        mutex.ReleaseMutex();
+                    }
+                    catch
+                    {
+                    }
+                }
             }
-
-            PatchPackageInfo package = ReadPatchPackageInfo(updateRoot);
-            if (string.IsNullOrWhiteSpace(package.Url) || string.IsNullOrWhiteSpace(package.Sha256))
-            {
-                PromptFullUpdate("本版本需要完整更新，请手动下载完整包。", fullDownloadPage);
-                return;
-            }
-
-            await DownloadAndInstallPatchAsync(baseDir, latestVersion, package, fullDownloadPage);
         }
         catch (Exception ex)
         {
-            WriteLog(baseDir, "自动检查更新失败：" + ex);
+            WriteLog($"启动器更新{operationName}异常：" + ex);
+            return null;
         }
     }
 
-    private static async Task DownloadAndInstallPatchAsync(
-        string baseDir,
-        string latestVersion,
-        PatchPackageInfo package,
-        string fullDownloadPage)
+    private static UpdateNotification? InstallPendingUpdate(string baseDir)
     {
-        string updatesDir = Path.Combine(baseDir, UpdatesDirName);
-        string stagingDir = Path.Combine(updatesDir, StagingDirName);
-        string patchZipPath = Path.Combine(updatesDir, "patch.zip");
-        string tmpPath = patchZipPath + ".tmp";
+        string pendingDir = GetPendingUpdateDir();
+        string manifestPath = Path.Combine(pendingDir, "update_manifest.json");
+        if (!File.Exists(manifestPath))
+            return null;
+
+        string patchZipPath = FindPendingPatchZip(pendingDir);
+        if (string.IsNullOrWhiteSpace(patchZipPath))
+        {
+            WriteLog("pending 更新缺少 Patch zip，已清理 pending");
+            TryDeleteDirectory(pendingDir);
+            return null;
+        }
+
+        try
+        {
+            using JsonDocument document = JsonDocument.Parse(File.ReadAllText(manifestPath, Encoding.UTF8));
+            UpdateDescriptor descriptor = ReadUpdateDescriptor(document.RootElement, "");
+            ValidatePatchDescriptor(descriptor);
+            string currentVersion = ReadInstalledAppVersion(baseDir);
+            if (string.IsNullOrWhiteSpace(currentVersion))
+            {
+                WriteLog("无法读取当前版本，跳过 pending 更新安装");
+                return null;
+            }
+
+            if (CompareVersions(currentVersion, descriptor.LatestVersion) >= 0)
+            {
+                WriteLog($"当前版本 {currentVersion} 已不低于 pending 版本 {descriptor.LatestVersion}，清理 pending 更新");
+                TryDeleteDirectory(pendingDir);
+                return null;
+            }
+
+            if (!string.IsNullOrWhiteSpace(descriptor.PatchBaselineVersion) &&
+                CompareVersions(currentVersion, descriptor.PatchBaselineVersion) < 0)
+            {
+                WriteLog($"当前版本 {currentVersion} 低于 pending Patch 基线 {descriptor.PatchBaselineVersion}，清理 pending 更新");
+                TryDeleteDirectory(pendingDir);
+                return BuildManualUpdateNotification(descriptor, "当前版本过旧，请自行下载完整包更新。");
+            }
+
+            ValidateDownloadedFileSize(patchZipPath, descriptor.PatchPackage.Size);
+            string actualHash = ComputeSha256(patchZipPath);
+            if (!string.Equals(actualHash, descriptor.PatchPackage.Sha256, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("pending Patch 包 SHA256 校验失败");
+
+            InstallPatchZip(baseDir, patchZipPath, descriptor);
+            TryDeleteDirectory(pendingDir);
+            WriteLog($"pending Patch 更新完成：{descriptor.LatestVersion}");
+            return new UpdateNotification(BuildSuccessMessage(descriptor), false);
+        }
+        catch (Exception ex)
+        {
+            WriteLog("pending Patch 更新失败：" + ex);
+
+            try
+            {
+                using JsonDocument document = JsonDocument.Parse(File.ReadAllText(manifestPath, Encoding.UTF8));
+                UpdateDescriptor descriptor = ReadUpdateDescriptor(document.RootElement, "");
+                return new UpdateNotification(BuildFailedMessage(descriptor), true);
+            }
+            catch
+            {
+                return null;
+            }
+            finally
+            {
+                TryDeleteDirectory(pendingDir);
+            }
+        }
+    }
+
+    private static async Task<UpdateNotification?> CheckAndDownloadPatchUpdateAsync(
+        string baseDir,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            if (!ReadAutoCheckEnabled())
+                return null;
+
+            string currentVersion = ReadInstalledAppVersion(baseDir);
+            if (string.IsNullOrWhiteSpace(currentVersion))
+            {
+                WriteLog("无法读取当前版本，跳过自动更新检查");
+                return null;
+            }
+
+            string checkUrl = GetUpdateCheckUrl(baseDir);
+            if (string.IsNullOrWhiteSpace(checkUrl))
+                return null;
+
+            using JsonDocument release = await GetJsonAsync(checkUrl, cancellationToken);
+            JsonElement releaseRoot = release.RootElement;
+            string tagName = ReadString(releaseRoot, "tag_name");
+            if (string.IsNullOrWhiteSpace(tagName))
+                return null;
+
+            string latestVersion = NormalizeVersion(tagName);
+            if (CompareVersions(latestVersion, currentVersion) <= 0)
+                return null;
+
+            AssetInfo? manifestAsset = FindUpdateManifestAsset(releaseRoot, latestVersion);
+            if (manifestAsset == null)
+                return null;
+
+            using JsonDocument updateManifest = await GetJsonAsync(manifestAsset.Url, cancellationToken);
+            UpdateDescriptor descriptor = ReadUpdateDescriptor(updateManifest.RootElement, latestVersion);
+
+            if (!descriptor.PatchSupported)
+                return BuildManualUpdateNotification(descriptor, "本版本需要完整更新，请自行下载完整包。");
+
+            if (!string.IsNullOrWhiteSpace(descriptor.PatchBaselineVersion) &&
+                CompareVersions(currentVersion, descriptor.PatchBaselineVersion) < 0)
+            {
+                return BuildManualUpdateNotification(descriptor, "当前版本过旧，请自行下载完整包更新。");
+            }
+
+            if (!IsPatchDescriptorUsable(descriptor))
+                return BuildManualUpdateNotification(descriptor, "本版本需要完整更新，请自行下载完整包。");
+
+            await DownloadPendingPatchAsync(updateManifest.RootElement, descriptor, cancellationToken);
+            WriteLog($"Patch 已下载到 pending，下次启动安装：{descriptor.LatestVersion}");
+            return null;
+        }
+        catch (OperationCanceledException ex)
+        {
+            WriteLog("自动检查更新超时：" + ex.Message);
+            return null;
+        }
+        catch (Exception ex)
+        {
+            WriteLog("自动检查更新失败：" + ex);
+            return null;
+        }
+    }
+
+    private static async Task DownloadPendingPatchAsync(
+        JsonElement manifestRoot,
+        UpdateDescriptor descriptor,
+        CancellationToken cancellationToken)
+    {
+        string updatesDir = GetUpdatesCacheDir();
+        string pendingDir = GetPendingUpdateDir();
+        string downloadDir = Path.Combine(updatesDir, "download");
+        string patchZipName = GetPatchZipFileName(descriptor);
+        string downloadPath = Path.Combine(downloadDir, patchZipName);
+        string pendingPatchPath = Path.Combine(pendingDir, patchZipName);
+        string pendingManifestPath = Path.Combine(pendingDir, "update_manifest.json");
+        string tmpPath = downloadPath + ".tmp";
 
         try
         {
             Directory.CreateDirectory(updatesDir);
-            SafeDeleteDirectory(stagingDir);
-            DeleteFileIfExists(patchZipPath);
+            SafeDeleteDirectory(downloadDir);
+            Directory.CreateDirectory(downloadDir);
             DeleteFileIfExists(tmpPath);
 
-            await DownloadFileAsync(package.Url, tmpPath);
+            await DownloadFileAsync(descriptor.PatchPackage.Url, tmpPath, cancellationToken);
+            ValidateDownloadedFileSize(tmpPath, descriptor.PatchPackage.Size);
             string actualHash = ComputeSha256(tmpPath);
-            if (!string.Equals(actualHash, package.Sha256, StringComparison.OrdinalIgnoreCase))
+            if (!string.Equals(actualHash, descriptor.PatchPackage.Sha256, StringComparison.OrdinalIgnoreCase))
                 throw new InvalidOperationException("Patch 包 SHA256 校验失败");
 
-            File.Move(tmpPath, patchZipPath);
-            ZipFile.ExtractToDirectory(patchZipPath, stagingDir, overwriteFiles: true);
-            InstallPatchFromStaging(baseDir, stagingDir, latestVersion);
-            SafeDeleteDirectory(stagingDir);
-            DeleteFileIfExists(patchZipPath);
-            WriteLog(baseDir, $"Patch 更新完成：{latestVersion}");
+            SafeDeleteDirectory(pendingDir);
+            Directory.CreateDirectory(pendingDir);
+            File.Move(tmpPath, pendingPatchPath);
+            File.WriteAllText(pendingManifestPath, manifestRoot.GetRawText(), Encoding.UTF8);
         }
-        catch (Exception ex)
+        finally
         {
-            WriteLog(baseDir, "Patch 更新失败：" + ex);
-            SafeDeleteDirectory(stagingDir);
-            DeleteFileIfExists(tmpPath);
-            DeleteFileIfExists(patchZipPath);
-            PromptFullUpdate("增量更新失败，请手动下载完整包。", fullDownloadPage);
+            TryDeleteFile(tmpPath);
+            TryDeleteDirectory(downloadDir);
         }
     }
 
-    private static void InstallPatchFromStaging(string baseDir, string stagingDir, string latestVersion)
+    private static void InstallPatchZip(string baseDir, string patchZipPath, UpdateDescriptor descriptor)
+    {
+        string stagingDir = Path.Combine(GetUpdatesCacheDir(), "staging");
+        SafeDeleteDirectory(stagingDir);
+
+        try
+        {
+            ZipFile.ExtractToDirectory(patchZipPath, stagingDir, overwriteFiles: true);
+            InstallPatchFromStaging(baseDir, stagingDir, descriptor);
+        }
+        finally
+        {
+            TryDeleteDirectory(stagingDir);
+        }
+    }
+
+    private static void InstallPatchFromStaging(string baseDir, string stagingDir, UpdateDescriptor descriptor)
     {
         string manifestPath = Path.Combine(stagingDir, "patch_manifest.json");
         string patchFilesDir = Path.Combine(stagingDir, "files");
@@ -142,18 +366,19 @@ internal static class Program
         if (!Directory.Exists(patchFilesDir))
             throw new InvalidOperationException("Patch 包缺少 files 目录");
 
-        List<PatchFile> files = ReadPatchFiles(manifestPath);
-        ValidatePatchFiles(patchFilesDir, files);
+        PatchManifest manifest = ReadPatchManifest(manifestPath);
+        ValidatePatchManifest(manifest, descriptor);
+        ValidatePatchFiles(patchFilesDir, manifest.Files);
 
         string appDir = Path.Combine(baseDir, "app");
-        string backupRoot = Path.Combine(baseDir, UpdatesDirName, BackupDirName);
+        string backupRoot = GetUpdateBackupDir();
         SafeDeleteDirectory(backupRoot);
         Directory.CreateDirectory(backupRoot);
 
         var backups = new List<FileBackup>();
         try
         {
-            foreach (PatchFile file in files)
+            foreach (PatchFile file in manifest.Files)
             {
                 string targetPath = GetSafeChildPath(appDir, file.RelativePath);
                 string backupPath = GetSafeChildPath(backupRoot, file.RelativePath);
@@ -167,7 +392,7 @@ internal static class Program
                 backups.Add(new FileBackup(targetPath, backupPath, existed));
             }
 
-            foreach (PatchFile file in files)
+            foreach (PatchFile file in manifest.Files)
             {
                 string sourcePath = GetSafeChildPath(patchFilesDir, file.RelativePath);
                 string targetPath = GetSafeChildPath(appDir, file.RelativePath);
@@ -175,8 +400,8 @@ internal static class Program
                 File.Copy(sourcePath, targetPath, overwrite: true);
             }
 
-            UpdateCurrentVersion(baseDir, latestVersion);
-            SafeDeleteDirectory(backupRoot);
+            ValidateInstalledApp(baseDir, descriptor.LatestVersion);
+            TryDeleteDirectory(backupRoot);
         }
         catch
         {
@@ -185,7 +410,7 @@ internal static class Program
         }
     }
 
-    private static List<PatchFile> ReadPatchFiles(string manifestPath)
+    private static PatchManifest ReadPatchManifest(string manifestPath)
     {
         using JsonDocument document = JsonDocument.Parse(File.ReadAllText(manifestPath, Encoding.UTF8));
         JsonElement root = document.RootElement;
@@ -193,6 +418,7 @@ internal static class Program
             throw new InvalidOperationException("Patch manifest 缺少 files 列表");
 
         var files = new List<PatchFile>();
+        var seenPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (JsonElement fileElement in filesElement.EnumerateArray())
         {
             string relativePath = NormalizeRelativePath(ReadString(fileElement, "path"));
@@ -200,15 +426,54 @@ internal static class Program
             long size = ReadInt64(fileElement, "size");
             if (string.IsNullOrWhiteSpace(relativePath) || string.IsNullOrWhiteSpace(sha256))
                 throw new InvalidOperationException("Patch manifest 文件条目不完整");
+            if (!seenPaths.Add(relativePath))
+                throw new InvalidOperationException($"Patch manifest 文件重复：{relativePath}");
 
             files.Add(new PatchFile(relativePath, sha256, size));
         }
 
-        return files;
+        return new PatchManifest(
+            ReadString(root, "type"),
+            NormalizeVersion(ReadString(root, "patch_baseline_version")),
+            NormalizeVersion(ReadString(root, "latest_version")),
+            files);
+    }
+
+    private static void ValidatePatchManifest(PatchManifest manifest, UpdateDescriptor descriptor)
+    {
+        if (!string.Equals(manifest.Type, PatchPackageType, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Patch manifest 类型不支持");
+
+        if (!string.Equals(manifest.LatestVersion, descriptor.LatestVersion, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Patch manifest 最新版本与更新描述不一致");
+
+        if (!string.IsNullOrWhiteSpace(descriptor.PatchBaselineVersion) &&
+            !string.Equals(manifest.PatchBaselineVersion, descriptor.PatchBaselineVersion, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("Patch manifest 基线版本与更新描述不一致");
+        }
+    }
+
+    private static void ValidatePatchDescriptor(UpdateDescriptor descriptor)
+    {
+        if (!IsPatchDescriptorUsable(descriptor))
+            throw new InvalidOperationException("更新描述中的 Patch 信息不完整或不支持");
+    }
+
+    private static bool IsPatchDescriptorUsable(UpdateDescriptor descriptor)
+    {
+        return descriptor.PatchSupported &&
+            string.Equals(descriptor.PatchPackage.Type, PatchPackageType, StringComparison.OrdinalIgnoreCase) &&
+            !string.IsNullOrWhiteSpace(descriptor.PatchPackage.Url) &&
+            !string.IsNullOrWhiteSpace(descriptor.PatchPackage.Sha256) &&
+            !string.IsNullOrWhiteSpace(descriptor.LatestVersion);
     }
 
     private static void ValidatePatchFiles(string patchFilesDir, List<PatchFile> files)
     {
+        if (files.Count == 0)
+            throw new InvalidOperationException("Patch manifest 文件列表为空");
+
         foreach (PatchFile file in files)
         {
             string sourcePath = GetSafeChildPath(patchFilesDir, file.RelativePath);
@@ -222,6 +487,33 @@ internal static class Program
             string hash = ComputeSha256(sourcePath);
             if (!string.Equals(hash, file.Sha256, StringComparison.OrdinalIgnoreCase))
                 throw new InvalidOperationException($"Patch 文件 SHA256 校验失败：{file.RelativePath}");
+        }
+    }
+
+    private static void ValidateDownloadedFileSize(string path, long expectedSize)
+    {
+        if (expectedSize <= 0)
+            return;
+
+        long actualSize = new FileInfo(path).Length;
+        if (actualSize != expectedSize)
+            throw new InvalidOperationException("Patch 包大小校验失败");
+    }
+
+    private static void ValidateInstalledApp(string baseDir, string expectedVersion)
+    {
+        string appPath = Path.Combine(baseDir, AppRelativePath);
+        string dllPath = Path.Combine(baseDir, AppDllRelativePath);
+        if (!File.Exists(appPath))
+            throw new InvalidOperationException("更新后缺少主程序 exe");
+        if (!File.Exists(dllPath))
+            throw new InvalidOperationException("更新后缺少主程序 dll");
+
+        string installedVersion = ReadInstalledAppVersion(baseDir);
+        if (string.IsNullOrWhiteSpace(installedVersion) ||
+            CompareVersions(installedVersion, expectedVersion) != 0)
+        {
+            throw new InvalidOperationException($"更新后版本校验失败：{installedVersion} != {expectedVersion}");
         }
     }
 
@@ -251,7 +543,7 @@ internal static class Program
     {
         if (!File.Exists(appPath))
         {
-            ShowError($"未找到主程序：{AppRelativePath}\n\n请确认 app 文件夹与本启动程序放在同一目录。");
+            ShowMessage($"未找到主程序：{AppRelativePath}\n\n请确认 app 文件夹与本启动程序放在同一目录。", ErrorIcon);
             return 2;
         }
 
@@ -272,31 +564,179 @@ internal static class Program
         }
         catch (Exception ex)
         {
-            ShowError($"启动主程序失败：\n{ex.Message}");
+            ShowMessage($"启动主程序失败：\n{ex.Message}", ErrorIcon);
             return 1;
         }
     }
 
-    private static async Task<JsonDocument> GetJsonAsync(string url)
+    private static bool IsAppRunning(string appPath)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Get, url);
-        request.Headers.UserAgent.ParseAdd("ExpressPackingMonitoring");
-        using HttpResponseMessage response = await HttpClient.SendAsync(request);
-        response.EnsureSuccessStatusCode();
-        await using Stream stream = await response.Content.ReadAsStreamAsync();
-        return await JsonDocument.ParseAsync(stream);
+        string expectedPath = Path.GetFullPath(appPath);
+        foreach (Process process in Process.GetProcessesByName("ExpressPackingMonitoring"))
+        {
+            try
+            {
+                if (process.Id == Environment.ProcessId)
+                    continue;
+
+                string? processPath = process.MainModule?.FileName;
+                if (!string.IsNullOrWhiteSpace(processPath) &&
+                    string.Equals(Path.GetFullPath(processPath), expectedPath, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+            catch
+            {
+            }
+            finally
+            {
+                process.Dispose();
+            }
+        }
+
+        return false;
     }
 
-    private static async Task DownloadFileAsync(string url, string path)
+    private static bool TryActivateExistingApp(string[] args)
+    {
+        string requestedRole = ResolveRequestedRole(args);
+        if (IsKnownRole(requestedRole) &&
+            IsRoleRunning(requestedRole) &&
+            RequestActivate(requestedRole))
+        {
+            return true;
+        }
+
+        string configuredRole = ReadConfiguredWorkstationRole();
+        if (IsKnownRole(configuredRole) &&
+            IsRoleRunning(configuredRole) &&
+            RequestActivate(configuredRole))
+        {
+            return true;
+        }
+
+        foreach (string role in new[] { CameraMonitorRole, PrintStationRole })
+        {
+            if (IsRoleRunning(role) && RequestActivate(role))
+                return true;
+        }
+
+        return false;
+    }
+
+    private static string ResolveRequestedRole(string[] args)
+    {
+        string temporaryRole = ResolveRoleOption(args, "--temporary-role");
+        if (IsKnownRole(temporaryRole))
+            return temporaryRole;
+
+        string requestedRole = ResolveRoleOption(args, "--role");
+        if (IsKnownRole(requestedRole))
+            return requestedRole;
+
+        if (args.Any(a => string.Equals(a, "--monitor", StringComparison.OrdinalIgnoreCase)))
+            return CameraMonitorRole;
+
+        if (args.Any(a => string.Equals(a, "--order-workstation", StringComparison.OrdinalIgnoreCase) ||
+                          string.Equals(a, "--print-station", StringComparison.OrdinalIgnoreCase)))
+        {
+            return PrintStationRole;
+        }
+
+        return "";
+    }
+
+    private static string ResolveRoleOption(string[] args, string optionName)
+    {
+        for (int i = 0; i < args.Length; i++)
+        {
+            string arg = args[i] ?? "";
+            if (arg.StartsWith(optionName + "=", StringComparison.OrdinalIgnoreCase))
+                return NormalizeRoleName(arg[(optionName.Length + 1)..]);
+            if (string.Equals(arg, optionName, StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
+                return NormalizeRoleName(args[i + 1]);
+        }
+
+        return "";
+    }
+
+    private static string ReadConfiguredWorkstationRole()
+    {
+        string path = Path.Combine(GetUserDataDir(), "config.json");
+        if (!File.Exists(path))
+            return "";
+
+        try
+        {
+            using JsonDocument document = JsonDocument.Parse(File.ReadAllText(path, Encoding.UTF8));
+            return NormalizeRoleName(ReadString(document.RootElement, "WorkstationRole"));
+        }
+        catch (Exception ex)
+        {
+            WriteLog("读取工位配置失败：" + ex.Message);
+            return "";
+        }
+    }
+
+    private static bool IsRoleRunning(string role)
+    {
+        if (!IsKnownRole(role))
+            return false;
+
+        try
+        {
+            using var existing = Mutex.OpenExisting(GetRoleMutexName(role));
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool RequestActivate(string role)
+    {
+        if (!IsKnownRole(role))
+            return false;
+
+        try
+        {
+            using var pipe = new NamedPipeClientStream(".", GetRolePipeName(role), PipeDirection.Out);
+            pipe.Connect(400);
+            using var writer = new StreamWriter(pipe) { AutoFlush = true };
+            writer.WriteLine("activate");
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static async Task<JsonDocument> GetJsonAsync(string url, CancellationToken cancellationToken)
     {
         using var request = new HttpRequestMessage(HttpMethod.Get, url);
         request.Headers.UserAgent.ParseAdd("ExpressPackingMonitoring");
-        using HttpResponseMessage response = await HttpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
+        using HttpResponseMessage response = await HttpClient.SendAsync(request, cancellationToken);
+        response.EnsureSuccessStatusCode();
+        await using Stream stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        return await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+    }
+
+    private static async Task DownloadFileAsync(string url, string path, CancellationToken cancellationToken)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, url);
+        request.Headers.UserAgent.ParseAdd("ExpressPackingMonitoring");
+        using HttpResponseMessage response = await HttpClient.SendAsync(
+            request,
+            HttpCompletionOption.ResponseHeadersRead,
+            cancellationToken);
         response.EnsureSuccessStatusCode();
 
-        await using Stream source = await response.Content.ReadAsStreamAsync();
+        await using Stream source = await response.Content.ReadAsStreamAsync(cancellationToken);
         await using Stream target = File.Create(path);
-        await source.CopyToAsync(target);
+        await source.CopyToAsync(target, cancellationToken);
     }
 
     private static AssetInfo? FindUpdateManifestAsset(JsonElement releaseRoot, string latestVersion)
@@ -324,59 +764,131 @@ internal static class Program
         return fallback;
     }
 
+    private static UpdateDescriptor ReadUpdateDescriptor(JsonElement manifestRoot, string fallbackVersion)
+    {
+        string latestVersion = NormalizeVersion(ReadString(manifestRoot, "latest_version"));
+        if (string.IsNullOrWhiteSpace(latestVersion))
+            latestVersion = fallbackVersion;
+
+        string fullDownloadPage = ReadString(manifestRoot, "full_download_page");
+        if (string.IsNullOrWhiteSpace(fullDownloadPage))
+            fullDownloadPage = ReadString(manifestRoot, "release_page");
+
+        return new UpdateDescriptor(
+            latestVersion,
+            ReadString(manifestRoot, "title"),
+            ReadNotes(manifestRoot),
+            fullDownloadPage,
+            NormalizeVersion(ReadString(manifestRoot, "patch_baseline_version")),
+            ReadBoolean(manifestRoot, "patch_supported"),
+            ReadPatchPackageInfo(manifestRoot));
+    }
+
     private static PatchPackageInfo ReadPatchPackageInfo(JsonElement manifestRoot)
     {
         if (!manifestRoot.TryGetProperty("patch_package", out JsonElement package) || package.ValueKind != JsonValueKind.Object)
-            return new PatchPackageInfo("", "");
+            return new PatchPackageInfo("", "", "", -1);
 
         return new PatchPackageInfo(
+            ReadString(package, "type"),
             ReadString(package, "url"),
-            ReadString(package, "sha256"));
+            ReadString(package, "sha256"),
+            ReadInt64(package, "size"));
     }
 
-    private static UpdateState LoadState(string baseDir)
+    private static string[] ReadNotes(JsonElement manifestRoot)
     {
-        string path = Path.Combine(baseDir, StateFileName);
+        if (!manifestRoot.TryGetProperty("notes", out JsonElement notes) || notes.ValueKind != JsonValueKind.Array)
+            return Array.Empty<string>();
+
+        return notes
+            .EnumerateArray()
+            .Where(note => note.ValueKind == JsonValueKind.String)
+            .Select(note => note.GetString() ?? "")
+            .Where(note => !string.IsNullOrWhiteSpace(note))
+            .ToArray();
+    }
+
+    private static UpdateNotification BuildManualUpdateNotification(UpdateDescriptor descriptor, string reason)
+    {
+        string message = $"{reason}\n\n发现新版本：v{descriptor.LatestVersion}";
+        if (!string.IsNullOrWhiteSpace(descriptor.FullDownloadPage))
+            message += $"\n完整包下载页：{descriptor.FullDownloadPage}";
+
+        return new UpdateNotification(message, true);
+    }
+
+    private static string BuildSuccessMessage(UpdateDescriptor descriptor)
+    {
+        var lines = new List<string>
+        {
+            $"更新完成，已升级到 v{descriptor.LatestVersion}。"
+        };
+
+        if (!string.IsNullOrWhiteSpace(descriptor.Title))
+        {
+            lines.Add("");
+            lines.Add(descriptor.Title);
+        }
+
+        if (descriptor.Notes.Length > 0)
+        {
+            lines.Add("");
+            lines.AddRange(descriptor.Notes.Select(note => "- " + note));
+        }
+
+        return string.Join(Environment.NewLine, lines);
+    }
+
+    private static string BuildFailedMessage(UpdateDescriptor descriptor)
+    {
+        string message = $"增量更新失败，已恢复旧版本。\n\n发现新版本：v{descriptor.LatestVersion}\n请自行下载完整包更新。";
+        if (!string.IsNullOrWhiteSpace(descriptor.FullDownloadPage))
+            message += $"\n完整包下载页：{descriptor.FullDownloadPage}";
+
+        return message;
+    }
+
+    private static bool ReadAutoCheckEnabled()
+    {
+        string path = Path.Combine(GetUserDataDir(), "config.json");
         if (!File.Exists(path))
-            return new UpdateState("0.0.0", true);
+            return true;
 
         try
         {
             using JsonDocument document = JsonDocument.Parse(File.ReadAllText(path, Encoding.UTF8));
-            JsonElement root = document.RootElement;
-            string version = ReadString(root, "current_version");
-            bool autoCheck = true;
-            if (root.TryGetProperty("auto_check_update", out JsonElement autoValue) &&
-                (autoValue.ValueKind == JsonValueKind.True || autoValue.ValueKind == JsonValueKind.False))
+            if (document.RootElement.TryGetProperty("EnableAutoCheckUpdate", out JsonElement value) &&
+                (value.ValueKind == JsonValueKind.True || value.ValueKind == JsonValueKind.False))
             {
-                autoCheck = autoValue.GetBoolean();
+                return value.GetBoolean();
             }
-
-            return new UpdateState(string.IsNullOrWhiteSpace(version) ? "0.0.0" : NormalizeVersion(version), autoCheck);
         }
-        catch
+        catch (Exception ex)
         {
-            return new UpdateState("0.0.0", true);
+            WriteLog("读取自动更新配置失败：" + ex.Message);
         }
+
+        return true;
     }
 
-    private static void UpdateCurrentVersion(string baseDir, string version)
+    private static string ReadInstalledAppVersion(string baseDir)
     {
-        UpdateState state = LoadState(baseDir);
-        state.CurrentVersion = NormalizeVersion(version);
-        SaveState(baseDir, state);
-    }
+        string dllPath = Path.Combine(baseDir, AppDllRelativePath);
+        if (!File.Exists(dllPath))
+            return "";
 
-    private static void SaveState(string baseDir, UpdateState state)
-    {
-        string path = Path.Combine(baseDir, StateFileName);
-        string version = state.CurrentVersion.Replace("\\", "\\\\").Replace("\"", "\\\"");
-        string json = "{\n" +
-            $"  \"current_version\": \"{version}\",\n" +
-            $"  \"auto_check_update\": {state.AutoCheckUpdate.ToString().ToLowerInvariant()}\n" +
-            "}\n";
-
-        File.WriteAllText(path, json, Encoding.UTF8);
+        try
+        {
+            FileVersionInfo info = FileVersionInfo.GetVersionInfo(dllPath);
+            string version = info.ProductVersion ?? "";
+            return NormalizeVersion(version);
+        }
+        catch (Exception ex)
+        {
+            WriteLog("读取当前版本失败：" + ex.Message);
+            return "";
+        }
     }
 
     private static string GetUpdateCheckUrl(string baseDir)
@@ -422,7 +934,7 @@ internal static class Program
         if (!element.TryGetProperty(propertyName, out JsonElement value))
             return false;
 
-        return value.ValueKind == JsonValueKind.True || (value.ValueKind == JsonValueKind.False ? false : false);
+        return value.ValueKind == JsonValueKind.True;
     }
 
     private static long ReadInt64(JsonElement element, string propertyName)
@@ -464,7 +976,11 @@ internal static class Program
     private static string NormalizeVersion(string value)
     {
         string normalized = value.Trim();
-        return normalized.StartsWith("v", StringComparison.OrdinalIgnoreCase) ? normalized[1..] : normalized;
+        if (normalized.StartsWith("v", StringComparison.OrdinalIgnoreCase))
+            normalized = normalized[1..];
+
+        int metadataIndex = normalized.IndexOf('+');
+        return metadataIndex > 0 ? normalized[..metadataIndex] : normalized;
     }
 
     private static string NormalizeRelativePath(string path)
@@ -498,19 +1014,110 @@ internal static class Program
         return Convert.ToHexString(hash).ToLowerInvariant();
     }
 
-    private static void PromptFullUpdate(string message, string fullDownloadPage)
+    private static string GetUserDataDir()
     {
-        ShowError(message);
-        if (string.IsNullOrWhiteSpace(fullDownloadPage))
-            return;
+        string localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        string root = string.IsNullOrWhiteSpace(localAppData) ? AppContext.BaseDirectory : localAppData;
+        return Path.Combine(root, "ExpressPackingMonitoring");
+    }
 
+    private static string GetUpdatesCacheDir()
+    {
+        return Path.Combine(GetUserDataDir(), "cache", "updates");
+    }
+
+    private static string GetPendingUpdateDir()
+    {
+        return Path.Combine(GetUpdatesCacheDir(), "pending");
+    }
+
+    private static bool HasPendingUpdate()
+    {
+        string pendingDir = GetPendingUpdateDir();
+        return File.Exists(Path.Combine(pendingDir, "update_manifest.json")) &&
+            !string.IsNullOrWhiteSpace(FindPendingPatchZip(pendingDir));
+    }
+
+    private static string GetUpdateBackupDir()
+    {
+        return Path.Combine(GetUserDataDir(), "backups", "launcher-update");
+    }
+
+    private static string GetLogPath()
+    {
+        return Path.Combine(GetUserDataDir(), "log", "launcher_update.log");
+    }
+
+    private static string FindPendingPatchZip(string pendingDir)
+    {
+        if (!Directory.Exists(pendingDir))
+            return "";
+
+        return Directory
+            .EnumerateFiles(pendingDir, "ExpressPackingMonitoring_AppPatch_v*.zip", SearchOption.TopDirectoryOnly)
+            .OrderByDescending(File.GetLastWriteTimeUtc)
+            .FirstOrDefault() ?? "";
+    }
+
+    private static string GetPatchZipFileName(UpdateDescriptor descriptor)
+    {
         try
         {
-            Process.Start(new ProcessStartInfo(fullDownloadPage) { UseShellExecute = true });
+            string fileName = Path.GetFileName(new Uri(descriptor.PatchPackage.Url).LocalPath);
+            if (!string.IsNullOrWhiteSpace(fileName) &&
+                fileName.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+            {
+                return fileName;
+            }
         }
         catch
         {
         }
+
+        return $"ExpressPackingMonitoring_AppPatch_v{descriptor.LatestVersion}.zip";
+    }
+
+    private static bool IsKnownRole(string role)
+    {
+        return string.Equals(role, CameraMonitorRole, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(role, PrintStationRole, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string NormalizeRoleName(string? role)
+    {
+        if (string.Equals(role, CameraMonitorRole, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(role, "monitor", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(role, "camera", StringComparison.OrdinalIgnoreCase))
+        {
+            return CameraMonitorRole;
+        }
+
+        if (string.Equals(role, PrintStationRole, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(role, "print", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(role, "printer", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(role, "order", StringComparison.OrdinalIgnoreCase))
+        {
+            return PrintStationRole;
+        }
+
+        return "";
+    }
+
+    private static string NormalizeRole(string role)
+    {
+        return string.Equals(role, PrintStationRole, StringComparison.OrdinalIgnoreCase)
+            ? PrintStationRole
+            : CameraMonitorRole;
+    }
+
+    private static string GetRoleMutexName(string role)
+    {
+        return $@"Local\{InstanceNamePrefix}.{NormalizeRole(role)}.Mutex";
+    }
+
+    private static string GetRolePipeName(string role)
+    {
+        return $"{InstanceNamePrefix}.{NormalizeRole(role)}.Activate";
     }
 
     private static void SafeDeleteDirectory(string path)
@@ -525,14 +1132,38 @@ internal static class Program
             File.Delete(path);
     }
 
-    private static void WriteLog(string baseDir, string message)
+    private static void TryDeleteDirectory(string path)
     {
         try
         {
-            string updatesDir = Path.Combine(baseDir, UpdatesDirName);
-            Directory.CreateDirectory(updatesDir);
+            SafeDeleteDirectory(path);
+        }
+        catch (Exception ex)
+        {
+            WriteLog("清理目录失败：" + path + Environment.NewLine + ex);
+        }
+    }
+
+    private static void TryDeleteFile(string path)
+    {
+        try
+        {
+            DeleteFileIfExists(path);
+        }
+        catch (Exception ex)
+        {
+            WriteLog("清理文件失败：" + path + Environment.NewLine + ex);
+        }
+    }
+
+    private static void WriteLog(string message)
+    {
+        try
+        {
+            string logPath = GetLogPath();
+            Directory.CreateDirectory(Path.GetDirectoryName(logPath)!);
             File.AppendAllText(
-                Path.Combine(updatesDir, LogFileName),
+                logPath,
                 $"[{DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss zzz}] {message}{Environment.NewLine}",
                 Encoding.UTF8);
         }
@@ -541,23 +1172,64 @@ internal static class Program
         }
     }
 
-    private static void ShowError(string message)
+    private static Thread ShowTimedMessageAsync(string message, uint icon)
     {
-        MessageBoxW(IntPtr.Zero, message, "打包监控", 0x00000010);
+        var thread = new Thread(() => ShowTimedMessage(message, icon));
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.IsBackground = false;
+        thread.Start();
+        return thread;
+    }
+
+    private static void ShowTimedMessage(string message, uint icon)
+    {
+        try
+        {
+            MessageBoxTimeoutW(IntPtr.Zero, message, "打包监控", icon, 0, DialogTimeoutMs);
+        }
+        catch
+        {
+            ShowMessage(message, icon);
+        }
+    }
+
+    private static void ShowMessage(string message, uint icon)
+    {
+        MessageBoxW(IntPtr.Zero, message, "打包监控", icon);
     }
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern int MessageBoxW(IntPtr hWnd, string lpText, string lpCaption, uint uType);
 
-    private sealed record UpdateState(string CurrentVersion, bool AutoCheckUpdate)
-    {
-        public string CurrentVersion { get; set; } = CurrentVersion;
-        public bool AutoCheckUpdate { get; set; } = AutoCheckUpdate;
-    }
+    [DllImport("user32.dll", EntryPoint = "MessageBoxTimeoutW", CharSet = CharSet.Unicode)]
+    private static extern int MessageBoxTimeoutW(
+        IntPtr hWnd,
+        string lpText,
+        string lpCaption,
+        uint uType,
+        ushort wLanguageId,
+        uint dwMilliseconds);
 
     private sealed record AssetInfo(string Name, string Url);
 
-    private sealed record PatchPackageInfo(string Url, string Sha256);
+    private sealed record PatchPackageInfo(string Type, string Url, string Sha256, long Size);
+
+    private sealed record UpdateDescriptor(
+        string LatestVersion,
+        string Title,
+        string[] Notes,
+        string FullDownloadPage,
+        string PatchBaselineVersion,
+        bool PatchSupported,
+        PatchPackageInfo PatchPackage);
+
+    private sealed record UpdateNotification(string Message, bool IsError);
+
+    private sealed record PatchManifest(
+        string Type,
+        string PatchBaselineVersion,
+        string LatestVersion,
+        List<PatchFile> Files);
 
     private sealed record PatchFile(string RelativePath, string Sha256, long Size);
 
