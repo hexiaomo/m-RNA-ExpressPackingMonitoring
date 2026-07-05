@@ -13,8 +13,10 @@ internal static class Program
     private const string AppDllRelativePath = "app\\ExpressPackingMonitoring.dll";
     private const string UpdateUrlKey = "UPDATE_CHECK_URL";
     private const string DefaultCheckUrl = "https://api.github.com/repos/m-RNA/ExpressPackingMonitoring/releases/latest";
+    private const string DefaultPatchDownloadBaseUrl = "https://github.com/m-RNA/ExpressPackingMonitoring/releases/download";
     private const string PatchPackageType = "baseline_patch";
     private const string UpdateMutexName = @"Local\ExpressPackingMonitoring.Launcher.Update";
+    private const int GithubDownloadFailureFallbackThreshold = 3;
     private const string InstanceNamePrefix = "ExpressPackingMonitoring";
     private const string CameraMonitorRole = "CameraMonitor";
     private const string PrintStationRole = "PrintStation";
@@ -213,6 +215,7 @@ internal static class Program
 
             InstallPatchZip(baseDir, patchZipPath, descriptor);
             TryDeleteDirectory(pendingDir);
+            ResetPatchDownloadFailureState();
             WriteLog($"pending Patch 更新完成：{descriptor.LatestVersion}");
             return new UpdateNotification(BuildSuccessMessage(descriptor), false);
         }
@@ -323,7 +326,32 @@ internal static class Program
             Directory.CreateDirectory(downloadDir);
             DeleteFileIfExists(tmpPath);
 
-            await DownloadFileAsync(descriptor.PatchPackage.Url, tmpPath, cancellationToken);
+            string githubUrl = BuildDefaultGithubPatchDownloadUrl(descriptor, patchZipName);
+            string fallbackUrl = descriptor.PatchPackage.Url;
+            PatchDownloadFailureState failureState = LoadPatchDownloadFailureState(descriptor.LatestVersion);
+            bool preferFallback = failureState.ConsecutiveGithubDownloadFailures >= GithubDownloadFailureFallbackThreshold &&
+                !AreSameUrl(githubUrl, fallbackUrl);
+            string selectedUrl = preferFallback ? fallbackUrl : githubUrl;
+
+            try
+            {
+                WriteLog($"准备下载 Patch：version={descriptor.LatestVersion}, source={(preferFallback ? "manifest" : "github")}, failures={failureState.ConsecutiveGithubDownloadFailures}, url={selectedUrl}");
+                await DownloadFileAsync(selectedUrl, tmpPath, cancellationToken);
+            }
+            catch (Exception ex) when (!preferFallback && !AreSameUrl(githubUrl, fallbackUrl))
+            {
+                failureState.ConsecutiveGithubDownloadFailures++;
+                SavePatchDownloadFailureState(failureState);
+                WriteLog($"GitHub Patch 下载失败 {failureState.ConsecutiveGithubDownloadFailures}/{GithubDownloadFailureFallbackThreshold}：{ex.Message}");
+
+                if (failureState.ConsecutiveGithubDownloadFailures < GithubDownloadFailureFallbackThreshold)
+                    throw;
+
+                TryDeleteFile(tmpPath);
+                WriteLog($"GitHub Patch 连续失败达到阈值，改用更新描述中的下载地址：{fallbackUrl}");
+                await DownloadFileAsync(fallbackUrl, tmpPath, cancellationToken);
+            }
+
             ValidateDownloadedFileSize(tmpPath, descriptor.PatchPackage.Size);
             string actualHash = ComputeSha256(tmpPath);
             if (!string.Equals(actualHash, descriptor.PatchPackage.Sha256, StringComparison.OrdinalIgnoreCase))
@@ -333,6 +361,7 @@ internal static class Program
             Directory.CreateDirectory(pendingDir);
             File.Move(tmpPath, pendingPatchPath);
             File.WriteAllText(pendingManifestPath, manifestRoot.GetRawText(), Encoding.UTF8);
+            ResetPatchDownloadFailureState();
         }
         finally
         {
@@ -937,6 +966,14 @@ internal static class Program
         return value.ValueKind == JsonValueKind.True;
     }
 
+    private static int ReadInt32(JsonElement element, string propertyName)
+    {
+        if (!element.TryGetProperty(propertyName, out JsonElement value))
+            return 0;
+
+        return value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out int result) ? result : 0;
+    }
+
     private static long ReadInt64(JsonElement element, string propertyName)
     {
         if (!element.TryGetProperty(propertyName, out JsonElement value))
@@ -981,6 +1018,11 @@ internal static class Program
 
         int metadataIndex = normalized.IndexOf('+');
         return metadataIndex > 0 ? normalized[..metadataIndex] : normalized;
+    }
+
+    private static string EscapeJsonString(string value)
+    {
+        return value.Replace("\\", "\\\\").Replace("\"", "\\\"");
     }
 
     private static string NormalizeRelativePath(string path)
@@ -1048,6 +1090,11 @@ internal static class Program
         return Path.Combine(GetUserDataDir(), "log", "launcher_update.log");
     }
 
+    private static string GetPatchDownloadFailureStatePath()
+    {
+        return Path.Combine(GetUpdatesCacheDir(), "patch_download_failures.json");
+    }
+
     private static string FindPendingPatchZip(string pendingDir)
     {
         if (!Directory.Exists(pendingDir))
@@ -1075,6 +1122,77 @@ internal static class Program
         }
 
         return $"ExpressPackingMonitoring_AppPatch_v{descriptor.LatestVersion}.zip";
+    }
+
+    private static string BuildDefaultGithubPatchDownloadUrl(UpdateDescriptor descriptor, string patchZipName)
+    {
+        string tag = "v" + NormalizeVersion(descriptor.LatestVersion);
+        return $"{DefaultPatchDownloadBaseUrl}/{Uri.EscapeDataString(tag)}/{Uri.EscapeDataString(patchZipName)}";
+    }
+
+    private static PatchDownloadFailureState LoadPatchDownloadFailureState(string latestVersion)
+    {
+        string normalizedVersion = NormalizeVersion(latestVersion);
+        string path = GetPatchDownloadFailureStatePath();
+        try
+        {
+            if (File.Exists(path))
+            {
+                using JsonDocument document = JsonDocument.Parse(File.ReadAllText(path, Encoding.UTF8));
+                JsonElement root = document.RootElement;
+                string stateVersion = NormalizeVersion(ReadString(root, "latest_version"));
+                int failures = ReadInt32(root, "consecutive_github_download_failures");
+                if (string.Equals(stateVersion, normalizedVersion, StringComparison.OrdinalIgnoreCase))
+                {
+                    return new PatchDownloadFailureState
+                    {
+                        LatestVersion = normalizedVersion,
+                        ConsecutiveGithubDownloadFailures = Math.Max(0, failures)
+                    };
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            WriteLog("读取 Patch 下载失败计数失败：" + ex.Message);
+        }
+
+        return new PatchDownloadFailureState
+        {
+            LatestVersion = normalizedVersion,
+            ConsecutiveGithubDownloadFailures = 0
+        };
+    }
+
+    private static void SavePatchDownloadFailureState(PatchDownloadFailureState state)
+    {
+        try
+        {
+            string path = GetPatchDownloadFailureStatePath();
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            string json = "{" +
+                $"\"latest_version\":\"{EscapeJsonString(NormalizeVersion(state.LatestVersion))}\"," +
+                $"\"consecutive_github_download_failures\":{Math.Max(0, state.ConsecutiveGithubDownloadFailures)}" +
+                "}";
+            File.WriteAllText(path, json, Encoding.UTF8);
+        }
+        catch (Exception ex)
+        {
+            WriteLog("写入 Patch 下载失败计数失败：" + ex.Message);
+        }
+    }
+
+    private static void ResetPatchDownloadFailureState()
+    {
+        TryDeleteFile(GetPatchDownloadFailureStatePath());
+    }
+
+    private static bool AreSameUrl(string left, string right)
+    {
+        if (string.IsNullOrWhiteSpace(left) || string.IsNullOrWhiteSpace(right))
+            return false;
+
+        return string.Equals(left.Trim(), right.Trim(), StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool IsKnownRole(string role)
@@ -1234,4 +1352,10 @@ internal static class Program
     private sealed record PatchFile(string RelativePath, string Sha256, long Size);
 
     private sealed record FileBackup(string TargetPath, string BackupPath, bool Existed);
+
+    private sealed class PatchDownloadFailureState
+    {
+        public string LatestVersion { get; set; } = "";
+        public int ConsecutiveGithubDownloadFailures { get; set; }
+    }
 }
