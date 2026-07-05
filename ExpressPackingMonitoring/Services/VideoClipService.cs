@@ -31,6 +31,7 @@ namespace ExpressPackingMonitoring.Services
         private readonly Action<string> _log;
         private readonly Func<VideoRecord, MkvConversionResult> _mkvConverter;
         private readonly Func<string, bool> _isCurrentRecordingFile;
+        private readonly Action _requestCacheCleanup;
         private readonly ConcurrentDictionary<string, ClipTaskState> _tasks = new();
         private readonly ConcurrentDictionary<string, object> _previewLocks = new(StringComparer.OrdinalIgnoreCase);
 
@@ -38,12 +39,14 @@ namespace ExpressPackingMonitoring.Services
             VideoDatabase db,
             Action<string> log,
             Func<VideoRecord, MkvConversionResult> mkvConverter = null,
-            Func<string, bool> isCurrentRecordingFile = null)
+            Func<string, bool> isCurrentRecordingFile = null,
+            Action requestCacheCleanup = null)
         {
             _db = db ?? throw new ArgumentNullException(nameof(db));
             _log = log ?? (_ => { });
             _mkvConverter = mkvConverter;
             _isCurrentRecordingFile = isCurrentRecordingFile ?? (_ => false);
+            _requestCacheCleanup = requestCacheCleanup ?? (() => { });
             Directory.CreateDirectory(AppPaths.ClipPreviewDir);
             Directory.CreateDirectory(AppPaths.ClipsDir);
         }
@@ -277,6 +280,7 @@ namespace ExpressPackingMonitoring.Services
                     File.Move(tmpPath, task.OutputPath, overwrite: true);
                     task.Status = "completed";
                     task.Message = "剪辑完成";
+                    RequestCacheCleanup();
                 }
             }
             catch (Exception ex)
@@ -472,9 +476,17 @@ namespace ExpressPackingMonitoring.Services
             lock (gate)
             {
                 if (!IsUsableFile(path))
+                {
                     RunFFmpegOrThrow($"-y -ss {FormatSeconds(seconds)} -i {Quote(filePath)} -frames:v 1 {Quote(path)}", path, 30_000);
+                    RequestCacheCleanup();
+                }
             }
             return path;
+        }
+
+        private void RequestCacheCleanup()
+        {
+            try { _requestCacheCleanup(); } catch { }
         }
 
         private static string BuildPreviewKey(long videoId, string filePath, double seconds)

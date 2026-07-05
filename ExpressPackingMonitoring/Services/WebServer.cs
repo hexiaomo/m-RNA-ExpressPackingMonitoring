@@ -82,7 +82,7 @@ namespace ExpressPackingMonitoring.Services
             _isRecordingProvider = isRecordingProvider ?? (() => false);
             _currentRecordingFileProvider = currentRecordingFileProvider ?? (() => null);
             _mkvConverter = mkvConverter;
-            _clipService = new VideoClipService(_db, WriteLog, _mkvConverter, IsCurrentRecordingFile);
+            _clipService = new VideoClipService(_db, WriteLog, _mkvConverter, IsCurrentRecordingFile, () => Task.Run(CleanWebCache));
             Port = port;
             _transCacheMaxBytes = (long)transCacheMaxMB * 1024 * 1024;
             _listener = CreateListener(port);
@@ -938,7 +938,7 @@ namespace ExpressPackingMonitoring.Services
 
             // 转码成功，将临时文件提升为正式缓存
             try { File.Move(tmpPath, cachePath, overwrite: true); } catch { }
-            Task.Run(() => CleanTranscodeCache());
+            Task.Run(CleanWebCache);
         }
 
         /// <summary>
@@ -1020,22 +1020,19 @@ namespace ExpressPackingMonitoring.Services
             }
         }
 
-        // ───── 转码缓存清理：超过上限时按最旧访问时间删除 ─────
-        private void CleanTranscodeCache()
+        // ───── Web 临时缓存清理：超过上限时按最旧访问时间删除 ─────
+        private void CleanWebCache()
         {
             try
             {
-                if (!Directory.Exists(_transCacheDir)) return;
-
-                var files = new DirectoryInfo(_transCacheDir)
-                    .GetFiles("*.mp4")
-                    .OrderBy(f => f.LastAccessTimeUtc)
+                var files = EnumerateWebCacheFiles()
+                    .OrderBy(f => GetCacheSortTimeUtc(f))
                     .ToList();
 
                 long totalSize = files.Sum(f => f.Length);
                 if (totalSize <= _transCacheMaxBytes) return;
 
-                Log($"CleanTranscodeCache: 当前 {totalSize / 1048576}MB / 上限 {_transCacheMaxBytes / 1048576}MB，开始清理");
+                Log($"CleanWebCache: 当前 {totalSize / 1048576}MB / 上限 {_transCacheMaxBytes / 1048576}MB，开始清理");
                 foreach (var f in files)
                 {
                     if (totalSize <= _transCacheMaxBytes * 0.8) break; // 清到 80% 水位
@@ -1044,15 +1041,39 @@ namespace ExpressPackingMonitoring.Services
                         long size = f.Length;
                         f.Delete();
                         totalSize -= size;
-                        Log($"CleanTranscodeCache: 删除 {f.Name} ({size / 1048576}MB)");
+                        Log($"CleanWebCache: 删除 {f.FullName} ({size / 1048576}MB)");
                     }
                     catch { }
                 }
             }
             catch (Exception ex)
             {
-                Log($"CleanTranscodeCache 异常: {ex.Message}");
+                Log($"CleanWebCache 异常: {ex.Message}");
             }
+        }
+
+        private static IEnumerable<FileInfo> EnumerateWebCacheFiles()
+        {
+            foreach (var file in EnumerateCacheFiles(AppPaths.TranscodeCacheDir, "*.mp4"))
+                yield return file;
+            foreach (var file in EnumerateCacheFiles(AppPaths.ClipPreviewDir, "*.jpg"))
+                yield return file;
+            foreach (var file in EnumerateCacheFiles(AppPaths.ClipsDir, "*.mp4"))
+                yield return file;
+        }
+
+        private static IEnumerable<FileInfo> EnumerateCacheFiles(string directory, string pattern)
+        {
+            if (!Directory.Exists(directory))
+                yield break;
+
+            foreach (var file in new DirectoryInfo(directory).GetFiles(pattern, SearchOption.TopDirectoryOnly))
+                yield return file;
+        }
+
+        private static DateTime GetCacheSortTimeUtc(FileInfo file)
+        {
+            return file.LastAccessTimeUtc > DateTime.MinValue ? file.LastAccessTimeUtc : file.LastWriteTimeUtc;
         }
 
         // ───── 运行 FFmpeg 转码，返回是否成功 ─────
