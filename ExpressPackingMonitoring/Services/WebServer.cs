@@ -744,6 +744,7 @@ namespace ExpressPackingMonitoring.Services
                 orderInfoPushTime = r.OrderInfoPushTime?.ToString("yyyy-MM-dd HH:mm:ss") ?? "",
                 r.Mode,
                 r.FileName,
+                filePath = r.FilePath ?? "",
                 videoCodec = r.VideoCodec ?? "",
                 sizeMB = Math.Round(r.FileSizeBytes / 1048576.0, 1),
                 startTime = r.StartTime.ToString("yyyy-MM-dd HH:mm:ss"),
