@@ -258,12 +258,22 @@
                         </Grid.ColumnDefinitions>
                         
                         <StackPanel Grid.Column="0" Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
-                            <TextBlock Text="今日件数:" FontSize="15" Foreground="{DynamicResource TextSecondary}" VerticalAlignment="Bottom" Margin="0,0,8,3"/>
-                            <TextBlock Text="{Binding TotalPieces}" FontSize="24" FontWeight="Black" Foreground="{DynamicResource AccentBlueDark}" Margin="0,0,24,0"/>
-                            <TextBlock Text="平均时长:" FontSize="15" Foreground="{DynamicResource TextSecondary}" VerticalAlignment="Bottom" Margin="0,0,8,3"/>
-                            <TextBlock Text="{Binding AveragePackTime}" FontSize="24" FontWeight="Black" Foreground="{DynamicResource AccentBlueDark}" Margin="0,0,24,0"/>
+                            <TextBlock Text="今日:" FontSize="15" Foreground="{DynamicResource TextSecondary}" VerticalAlignment="Bottom" Margin="0,0,8,3"/>
+                            <TextBlock FontSize="24" FontWeight="Black" Foreground="{DynamicResource AccentBlueDark}" Margin="0,0,24,0">
+                                <Run Text="{Binding TotalPieces, Mode=OneWay}"/><Run Text="件" FontSize="15"/>
+                            </TextBlock>
+                            <TextBlock Text="平均:" FontSize="15" Foreground="{DynamicResource TextSecondary}" VerticalAlignment="Bottom" Margin="0,0,8,3"/>
+                            <TextBlock FontSize="24" FontWeight="Black" Foreground="{DynamicResource AccentBlueDark}" Margin="0,0,24,0">
+                                <Run Text="{Binding AveragePackTimeDisplay.HourValue, Mode=OneWay}"/><Run Text="{Binding AveragePackTimeDisplay.HourUnit, Mode=OneWay}" FontSize="15"/>
+                                <Run Text="{Binding AveragePackTimeDisplay.MinuteValue, Mode=OneWay}"/><Run Text="{Binding AveragePackTimeDisplay.MinuteUnit, Mode=OneWay}" FontSize="15"/>
+                                <Run Text="{Binding AveragePackTimeDisplay.SecondValue, Mode=OneWay}"/><Run Text="{Binding AveragePackTimeDisplay.SecondUnit, Mode=OneWay}" FontSize="15"/>
+                            </TextBlock>
                             <TextBlock Text="总耗时:" FontSize="15" Foreground="{DynamicResource TextSecondary}" VerticalAlignment="Bottom" Margin="0,0,8,3"/>
-                            <TextBlock Text="{Binding TotalPackTimeStr}" FontSize="24" FontWeight="Black" Foreground="{DynamicResource AccentBlueDark}"/>
+                            <TextBlock FontSize="24" FontWeight="Black" Foreground="{DynamicResource AccentBlueDark}">
+                                <Run Text="{Binding TotalPackTimeDisplay.HourValue, Mode=OneWay}"/><Run Text="{Binding TotalPackTimeDisplay.HourUnit, Mode=OneWay}" FontSize="15"/>
+                                <Run Text="{Binding TotalPackTimeDisplay.MinuteValue, Mode=OneWay}"/><Run Text="{Binding TotalPackTimeDisplay.MinuteUnit, Mode=OneWay}" FontSize="15"/>
+                                <Run Text="{Binding TotalPackTimeDisplay.SecondValue, Mode=OneWay}"/><Run Text="{Binding TotalPackTimeDisplay.SecondUnit, Mode=OneWay}" FontSize="15"/>
+                            </TextBlock>
                         </StackPanel>
 
                         <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">

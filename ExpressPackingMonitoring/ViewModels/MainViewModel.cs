@@ -194,9 +194,50 @@ namespace ExpressPackingMonitoring.ViewModels
 
         private int _totalPieces;
         private TimeSpan _totalPackTime;
-        public int TotalPieces { get => _totalPieces; set { SetProperty(ref _totalPieces, value); OnPropertyChanged(nameof(AveragePackTime)); } }
-        public string TotalPackTimeStr => $"{(int)_totalPackTime.TotalHours:D2}:{_totalPackTime.Minutes:D2}";
-        public string AveragePackTime => TotalPieces == 0 ? "00:00" : TimeSpan.FromSeconds(_totalPackTime.TotalSeconds / TotalPieces).ToString(@"mm\:ss");
+        public int TotalPieces { get => _totalPieces; set { SetProperty(ref _totalPieces, value); OnPropertyChanged(nameof(AveragePackTimeDisplay)); } }
+        public DurationDisplayText TotalPackTimeDisplay => FormatDurationDisplay(_totalPackTime);
+        public DurationDisplayText AveragePackTimeDisplay => TotalPieces == 0 ? DurationDisplayText.Zero : FormatDurationDisplay(TimeSpan.FromSeconds(_totalPackTime.TotalSeconds / TotalPieces));
+
+        public sealed class DurationDisplayText
+        {
+            public static DurationDisplayText Zero { get; } = new("", "", "", "", "0", "秒");
+
+            public DurationDisplayText(string hourValue, string hourUnit, string minuteValue, string minuteUnit, string secondValue, string secondUnit)
+            {
+                HourValue = hourValue;
+                HourUnit = hourUnit;
+                MinuteValue = minuteValue;
+                MinuteUnit = minuteUnit;
+                SecondValue = secondValue;
+                SecondUnit = secondUnit;
+            }
+
+            public string HourValue { get; }
+            public string HourUnit { get; }
+            public string MinuteValue { get; }
+            public string MinuteUnit { get; }
+            public string SecondValue { get; }
+            public string SecondUnit { get; }
+        }
+
+        private static DurationDisplayText FormatDurationDisplay(TimeSpan duration)
+        {
+            if (duration < TimeSpan.Zero)
+                duration = TimeSpan.Zero;
+
+            int totalSeconds = (int)Math.Round(duration.TotalSeconds);
+            int hours = totalSeconds / 3600;
+            int minutes = totalSeconds % 3600 / 60;
+            int seconds = totalSeconds % 60;
+
+            return new DurationDisplayText(
+                hours > 0 ? hours.ToString() : "",
+                hours > 0 ? "时" : "",
+                minutes > 0 || hours > 0 ? minutes.ToString() : "",
+                minutes > 0 || hours > 0 ? "分" : "",
+                seconds.ToString(),
+                "秒");
+        }
 
         private string _toastMessage;
         private bool _isToastVisible;
@@ -500,7 +541,7 @@ namespace ExpressPackingMonitoring.ViewModels
                     TotalPieces = 0;
                     _totalPackTime = TimeSpan.Zero;
                 }
-                OnPropertyChanged(nameof(TotalPackTimeStr)); OnPropertyChanged(nameof(AveragePackTime));
+                OnPropertyChanged(nameof(TotalPackTimeDisplay)); OnPropertyChanged(nameof(AveragePackTimeDisplay));
             }
             catch { }
         }
