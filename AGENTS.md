@@ -40,6 +40,7 @@ powershell -ExecutionPolicy Bypass -File Tools\Publish-CleanPackage.ps1
 - AppPatch packages are fixed-baseline cumulative patches. The default patch baseline is `0.0.18`, but scripts may allow overriding it when a new formal baseline is chosen.
 - Keep update URLs configurable through environment variables or `.env`. The default update check URL is GitHub releases latest API; `.env` may point to another release provider.
 - Do not generate AppFull packages. Release uploads normally include the full zip, `update_vX.Y.Z.json`, optional `ExpressPackingMonitoring_AppPatch_vX.Y.Z.zip`, and `launcher_manifest_vX.Y.Z.json`.
+- Do not update ExpressPackingMonitoring.Launcher unless necessary
 
 ## Storage, Cache, and Web Video
 
@@ -49,7 +50,7 @@ powershell -ExecutionPolicy Bypass -File Tools\Publish-CleanPackage.ps1
 
 ## Coding Style & Naming Conventions
 
-Use C# with nullable references and implicit usings enabled. Follow the existing WPF/MVVM style: `PascalCase` for public types, properties, and commands; `camelCase` for locals; `_camelCase` for private fields. Keep XAML names descriptive and aligned with their backing view or view model. Preserve UTF-8 text and avoid broad line-ending or encoding churn, especially in Chinese strings, XAML, HTML, and userscript files.
+Use C# with nullable references and implicit usings enabled. Follow the existing WPF/MVVM style: `PascalCase` for public types, properties, and commands; `camelCase` for locals; `_camelCase` for private fields. Keep XAML names descriptive and aligned with their backing view or view model. Preserve UTF-8 text and avoid broad line-ending or encoding churn, especially in Chinese strings, XAML, HTML, and userscript files. UI copy should not be followed by a Chinese period or English period at the end of the sentence.
 
 ## Testing Guidelines
 

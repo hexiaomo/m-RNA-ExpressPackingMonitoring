@@ -1,1 +1,0 @@
-powershell -ExecutionPolicy Bypass -File Tools\Publish-CleanPackage.ps1 -DisablePatch -Version "v0.0.18"
