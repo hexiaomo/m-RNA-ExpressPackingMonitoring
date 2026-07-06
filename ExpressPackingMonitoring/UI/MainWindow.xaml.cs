@@ -6,6 +6,7 @@ using System.Windows.Controls;
 using System.Windows.Interop;
 using System.Windows.Input;
 using System.Windows.Threading;
+using ExpressPackingMonitoring.Config;
 using ExpressPackingMonitoring.ViewModels;
 
 namespace ExpressPackingMonitoring.UI
@@ -172,17 +173,7 @@ namespace ExpressPackingMonitoring.UI
                     };
                 }
 
-                // 【单文件打包兼容修复】：改用 AppContext.BaseDirectory 或 Process.GetCurrentProcess().MainModule.FileName 取代 Assembly.GetExecutingAssembly().Location
-                try
-                {
-                    string processObjPath = System.Diagnostics.Process.GetCurrentProcess()?.MainModule?.FileName ?? AppContext.BaseDirectory;
-                    var buildTime = System.IO.File.GetLastWriteTime(processObjPath);
-                    this.Title = $"打包监控 (编译于: {buildTime:yyyy-MM-dd HH:mm})";
-                }
-                catch
-                {
-                    this.Title = "打包监控";
-                }
+                Title = $"快递打包监控 {AppVersion.Current}";
 
                 Dispatcher.BeginInvoke(new Action(() =>
                 {

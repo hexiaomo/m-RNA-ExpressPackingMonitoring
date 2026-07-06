@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Reflection;
 
 namespace ExpressPackingMonitoring.Config
@@ -8,6 +9,7 @@ namespace ExpressPackingMonitoring.Config
         private const string FallbackCurrent = "v0.0.0";
 
         public static string Current => GetCurrentVersion();
+        public static string BuildDateText => GetBuildDateText();
 
         private static string GetCurrentVersion()
         {
@@ -38,6 +40,20 @@ namespace ExpressPackingMonitoring.Config
             string version = value.Trim();
             int metadataIndex = version.IndexOf('+');
             return metadataIndex > 0 ? version[..metadataIndex] : version;
+        }
+
+        private static string GetBuildDateText()
+        {
+            try
+            {
+                string processPath = Environment.ProcessPath ?? AppContext.BaseDirectory;
+                DateTime buildTime = File.GetLastWriteTime(processPath);
+                return $"编译日期 {buildTime:yyyy-MM-dd HH:mm}";
+            }
+            catch
+            {
+                return "编译日期未知";
+            }
         }
     }
 }

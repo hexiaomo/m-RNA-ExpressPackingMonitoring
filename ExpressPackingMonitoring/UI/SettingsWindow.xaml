@@ -2668,7 +2668,7 @@
                                                        Margin="0,5,0,0"
                                                        FontSize="12"
                                                        Foreground="{DynamicResource TextSecondary}"/>
-                                            <TextBlock Text="面向电商打包场景的录像、回放和订单备注播报工具"
+                                            <TextBlock Text="{Binding AppBuildDate}"
                                                        Margin="0,6,0,0"
                                                        FontSize="12"
                                                        Foreground="{DynamicResource TextSecondary}"

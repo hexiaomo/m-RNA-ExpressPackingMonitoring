@@ -99,6 +99,7 @@ namespace ExpressPackingMonitoring.UI
         public double CurrentDiskUsagePercent { get; set; }
         public string CurrentDiskUsageText { get; set; }
         public string AppVersion { get; } = ExpressPackingMonitoring.Config.AppVersion.Current;
+        public string AppBuildDate { get; } = ExpressPackingMonitoring.Config.AppVersion.BuildDateText;
         public ImageSource AppIconImage { get; } = GetLargestAppIconImage();
         public List<EdgeVoiceOption> EdgeVoiceOptions { get; } = new()
         {
