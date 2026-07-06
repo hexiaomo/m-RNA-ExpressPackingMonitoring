@@ -136,6 +136,7 @@ function Compress-PackageWithRetry {
         [string]$DestinationZip
     )
 
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
     $lastError = $null
     for ($attempt = 1; $attempt -le 5; $attempt++) {
         try {
@@ -143,8 +144,12 @@ function Compress-PackageWithRetry {
                 Remove-Item -LiteralPath $DestinationZip -Force
             }
 
-            Get-ChildItem -LiteralPath $SourceDir -Force |
-                Compress-Archive -DestinationPath $DestinationZip -CompressionLevel Optimal -Force
+            [System.IO.Compression.ZipFile]::CreateFromDirectory(
+                $SourceDir,
+                $DestinationZip,
+                [System.IO.Compression.CompressionLevel]::Optimal,
+                $false,
+                [System.Text.Encoding]::UTF8)
             return
         }
         catch {
@@ -422,6 +427,14 @@ function New-AppPatchPackage {
     $patchManifest |
         ConvertTo-Json -Depth 6 |
         Set-Content -LiteralPath (Join-Path $patchWorkDir "patch_manifest.json") -Encoding UTF8
+
+    $manualDownloadNoticeName = ConvertFrom-Utf8Base64 "5LiL6L296ZSZ5LqGX+i/meaYr+iHquWKqOabtOaWsOWMhV/or7fkuIvovb3lrozmlbTljIUudHh0"
+    $manualDownloadNotice = @(
+        "This is an automatic update package."
+        "Do not install it manually."
+        "Please download the full package instead."
+    ) -join [Environment]::NewLine
+    Set-Content -LiteralPath (Join-Path $patchWorkDir $manualDownloadNoticeName) -Value $manualDownloadNotice -Encoding UTF8
 
     Compress-PackageWithRetry -SourceDir $patchWorkDir -DestinationZip $PatchZipPath
     Remove-Item -LiteralPath $patchWorkDir -Recurse -Force
