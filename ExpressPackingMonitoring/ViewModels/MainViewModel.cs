@@ -1302,7 +1302,7 @@ namespace ExpressPackingMonitoring.ViewModels
 
                 bool ok = await Task.Run(() =>
                 {
-                    var result = ConvertMkvToMp4ForPlayback(mkvPath);
+                    var result = ConvertMkvToMp4ForPlayback(mkvPath, token);
                     if (!result.Success)
                         RuntimeLog.Warn("MkvRecover", $"Convert failed file={fileName}, error={result.ErrorMessage}");
                     return result.Success;

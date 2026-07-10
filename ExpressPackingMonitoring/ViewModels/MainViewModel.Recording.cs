@@ -2033,11 +2033,15 @@ namespace ExpressPackingMonitoring.ViewModels
             return ConvertMkvToMp4ForPlayback(filePath);
         }
 
-        private MkvConversionResult ConvertMkvToMp4ForPlayback(string mkvPath)
+        private MkvConversionResult ConvertMkvToMp4ForPlayback(string mkvPath, CancellationToken cancellationToken = default)
         {
-            _mkvConvertLock.Wait();
+            bool lockTaken = false;
             try
             {
+                _mkvConvertLock.Wait(cancellationToken);
+                lockTaken = true;
+                cancellationToken.ThrowIfCancellationRequested();
+
                 if (string.IsNullOrWhiteSpace(mkvPath) || !File.Exists(mkvPath))
                     return MkvConversionResult.Fail("MKV 文件不存在", mkvPath ?? "");
                 if (!mkvPath.EndsWith(".mkv", StringComparison.OrdinalIgnoreCase))
@@ -2091,13 +2095,13 @@ namespace ExpressPackingMonitoring.ViewModels
                     return MkvConversionResult.Fail("FFmpeg 进程启动失败", mkvPath);
 
                 string stderr;
-                bool exited = WaitForProcessExit(process, GetMediaProcessTimeoutMs(mkvPath, audioPath), out stderr);
+                bool exited = WaitForProcessExit(process, GetMediaProcessTimeoutMs(mkvPath, audioPath), cancellationToken, out stderr);
                 bool hasExternalAudio = !string.IsNullOrEmpty(audioPath) && File.Exists(audioPath);
                 bool ok = exited
                     && process.ExitCode == 0
                     && File.Exists(mp4Path)
                     && new FileInfo(mp4Path).Length > 0
-                    && ValidateConvertedMp4(ffmpegPath, mp4Path, hasExternalAudio, audioLogPath);
+                    && ValidateConvertedMp4(ffmpegPath, mp4Path, hasExternalAudio, audioLogPath, cancellationToken);
 
                 if (!ok)
                 {
@@ -2113,6 +2117,10 @@ namespace ExpressPackingMonitoring.ViewModels
                 RuntimeLog.Info("MkvToMp4", $"Converted file={Path.GetFileName(mkvPath)}, audio={(hasExternalAudio ? "yes" : "no")}");
                 return MkvConversionResult.Ok(mp4Path);
             }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
             catch (Exception ex)
             {
                 RuntimeLog.Error("MkvToMp4", $"Convert exception file={Path.GetFileName(mkvPath ?? "")}", ex);
@@ -2120,7 +2128,8 @@ namespace ExpressPackingMonitoring.ViewModels
             }
             finally
             {
-                _mkvConvertLock.Release();
+                if (lockTaken)
+                    _mkvConvertLock.Release();
             }
         }
 
@@ -2168,7 +2177,12 @@ namespace ExpressPackingMonitoring.ViewModels
             return $"-y -i \"{mkvPath}\" -i \"{audioPath}\"{filter} -map 0:v:0 -map \"{audioMap}\" -c:v copy -c:a aac -b:a 128k -shortest \"{mp4Path}\"";
         }
 
-        private bool ValidateConvertedMp4(string ffmpegPath, string mp4Path, bool requireAudio, string? audioLogPath)
+        private bool ValidateConvertedMp4(
+            string ffmpegPath,
+            string mp4Path,
+            bool requireAudio,
+            string? audioLogPath,
+            CancellationToken cancellationToken = default)
         {
             if (!File.Exists(mp4Path)) return false;
             if (!requireAudio) return true;
@@ -2197,7 +2211,7 @@ namespace ExpressPackingMonitoring.ViewModels
                 }
 
                 string stderr;
-                bool exited = WaitForProcessExit(process, GetMediaProcessTimeoutMs(mp4Path), out stderr);
+                bool exited = WaitForProcessExit(process, GetMediaProcessTimeoutMs(mp4Path), cancellationToken, out stderr);
 
                 if (!exited)
                 {
@@ -2226,6 +2240,10 @@ namespace ExpressPackingMonitoring.ViewModels
 
                 WriteAudioDiagnostic("MP4 音轨完整解码和时间线校验通过", audioLogPath);
                 return true;
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
             }
             catch (Exception ex)
             {
@@ -2403,8 +2421,22 @@ namespace ExpressPackingMonitoring.ViewModels
 
         private static bool WaitForProcessExit(Process process, int timeoutMs, out string stderr)
         {
+            return WaitForProcessExit(process, timeoutMs, CancellationToken.None, out stderr);
+        }
+
+        private static bool WaitForProcessExit(Process process, int timeoutMs, CancellationToken cancellationToken, out string stderr)
+        {
             var stderrTask = process.StandardError.ReadToEndAsync();
             var stdoutTask = process.StandardOutput.ReadToEndAsync();
+            using var cancellationRegistration = cancellationToken.Register(() =>
+            {
+                try
+                {
+                    if (!process.HasExited)
+                        process.Kill(entireProcessTree: true);
+                }
+                catch { }
+            });
 
             bool exited = process.WaitForExit(timeoutMs);
             if (!exited)
@@ -2415,6 +2447,7 @@ namespace ExpressPackingMonitoring.ViewModels
 
             stderr = TryGetProcessOutput(stderrTask);
             _ = TryGetProcessOutput(stdoutTask);
+            cancellationToken.ThrowIfCancellationRequested();
             return exited;
         }
 
