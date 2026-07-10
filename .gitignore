@@ -10,6 +10,8 @@ ExpressPackingMonitoring.Launcher/bin/
 ExpressPackingMonitoring.Launcher/obj/
 ExpressPackingMonitoring.Launcher/bin_publish_tmp/
 ExpressPackingMonitoring.Launcher/obj_publish_tmp/
+ExpressPackingMonitoring.Tests/bin/
+ExpressPackingMonitoring.Tests/obj/
 ExpressPackingMonitoring/bin/Release/package/
 ExpressPackingMonitoring/package/
 ExpressPackingMonitoring/publish-test/

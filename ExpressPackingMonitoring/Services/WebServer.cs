@@ -36,7 +36,7 @@ namespace ExpressPackingMonitoring.Services
     {
         private const int MaxJsonBodyBytes = 64 * 1024;
         private const int MaxOrderInfoBodyBytes = 1024 * 1024;
-        private const int MaxOrderInfoItems = 200;
+        internal const int MaxOrderInfoItems = 200;
         private HttpListener _listener;
         private readonly VideoDatabase _db;
         private readonly Func<bool> _isRecordingProvider;
@@ -1353,7 +1353,7 @@ namespace ExpressPackingMonitoring.Services
             return encoding.GetString(buffer.GetBuffer(), 0, checked((int)buffer.Length));
         }
 
-        private static void ValidateOrderInfoItems(List<OrderInfo> items)
+        internal static void ValidateOrderInfoItems(List<OrderInfo> items)
         {
             if (items.Count > MaxOrderInfoItems)
                 throw new InvalidDataException($"单次最多推送 {MaxOrderInfoItems} 条订单");

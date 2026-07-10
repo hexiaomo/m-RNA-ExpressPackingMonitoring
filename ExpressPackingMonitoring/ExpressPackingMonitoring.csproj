@@ -32,6 +32,12 @@
     </AssemblyAttribute>
   </ItemGroup>
 
+  <ItemGroup>
+    <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleToAttribute">
+      <_Parameter1>ExpressPackingMonitoring.Tests</_Parameter1>
+    </AssemblyAttribute>
+  </ItemGroup>
+
   <!-- 修复自包含发布时 ComboBox 因缺少 Accessibility.dll 报错的问题 -->
   <ItemGroup>
     <Content Include="$(WinDir)\Microsoft.NET\Framework64\v4.0.30319\Accessibility.dll"
