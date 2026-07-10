@@ -1031,7 +1031,9 @@ namespace ExpressPackingMonitoring.ViewModels
                     bool webServerChanged = Config.EnableWebServer != clonedConfig.EnableWebServer
                         || Config.WebServerPort != clonedConfig.WebServerPort
                         || Config.TranscodeCacheMaxMB != clonedConfig.TranscodeCacheMaxMB
-                        || Config.EnableOrderInfoLog != clonedConfig.EnableOrderInfoLog;
+                        || Config.EnableOrderInfoLog != clonedConfig.EnableOrderInfoLog
+                        || Config.RequireWebAccessKey != clonedConfig.RequireWebAccessKey
+                        || !string.Equals(Config.WebAccessKey, clonedConfig.WebAccessKey, StringComparison.Ordinal);
                     bool webServerNeedsRecovery = clonedConfig.EnableWebServer && _webServer == null;
 
                     AppConfig.NormalizeAfterLoad(clonedConfig);
@@ -1509,10 +1511,20 @@ namespace ExpressPackingMonitoring.ViewModels
                 int port = Config.WebServerPort;
                 int cacheMaxMb = Config.TranscodeCacheMaxMB;
                 bool enableOrderInfoLog = Config.EnableOrderInfoLog;
+                bool requireAccessKey = Config.RequireWebAccessKey;
+                string accessKey = Config.WebAccessKey;
 
                 newServer = await Task.Run(() =>
                 {
-                    var server = new WebServer(_db, port, cacheMaxMb, () => IsRecording, ConvertRecordMkvToMp4, () => _currentVideoFilePath)
+                    var server = new WebServer(
+                        _db,
+                        port,
+                        cacheMaxMb,
+                        () => IsRecording,
+                        ConvertRecordMkvToMp4,
+                        () => _currentVideoFilePath,
+                        requireAccessKey,
+                        accessKey)
                     {
                         EnableOrderInfoLog = enableOrderInfoLog
                     };
@@ -1589,9 +1601,13 @@ namespace ExpressPackingMonitoring.ViewModels
                 return;
 
             MonitorAccessAddress = verifiedAddress;
-            WorkstationAccessText = $"其他电脑查视频：{MonitorAccessAddress}";
+            WorkstationAccessText = Config.RequireWebAccessKey
+                ? $"其他电脑查视频：{MonitorAccessAddress}（访问保护已开启）"
+                : $"其他电脑查视频：{MonitorAccessAddress}";
             WorkstationPrintStatusText = "快递单打印工位：等待连接";
-            WorkstationStatusToolTip = $"其他电脑在浏览器输入 http://{MonitorAccessAddress}，即可搜索、下载和播放视频。若打不开，请确认两台电脑在同一局域网，并检查防火墙。";
+            WorkstationStatusToolTip = Config.RequireWebAccessKey
+                ? "访问保护已开启。请点击底部地址复制完整访问链接，再发送到需要查看录像的设备。"
+                : $"其他电脑在浏览器输入 http://{MonitorAccessAddress}，即可搜索、下载和播放视频。若打不开，请确认两台电脑在同一局域网，并检查防火墙。";
         }
 
         public void CopyMonitorAddress()
@@ -1602,7 +1618,7 @@ namespace ExpressPackingMonitoring.ViewModels
                 return;
             }
 
-            string url = WorkstationNetwork.ToUrl(MonitorAccessAddress);
+            string url = BuildMonitorAccessUrl();
             bool copied = false;
             for (int i = 0; i < 3 && !copied; i++)
             {
@@ -1626,6 +1642,14 @@ namespace ExpressPackingMonitoring.ViewModels
                 ShowToast("已打开监控网页，复制失败请重试");
             else
                 ShowToast($"复制和打开都失败: {openError}");
+        }
+
+        private string BuildMonitorAccessUrl()
+        {
+            string url = WorkstationNetwork.ToUrl(MonitorAccessAddress);
+            if (!Config.RequireWebAccessKey || string.IsNullOrWhiteSpace(Config.WebAccessKey))
+                return url;
+            return $"{url}/?key={Uri.EscapeDataString(Config.WebAccessKey)}";
         }
 
         public void SwitchWorkstation()
@@ -1670,7 +1694,9 @@ namespace ExpressPackingMonitoring.ViewModels
                 if (string.IsNullOrWhiteSpace(MonitorAccessAddress))
                     _ = RefreshWorkstationStatusAsync();
                 else
-                    WorkstationAccessText = $"其他电脑查视频：{MonitorAccessAddress}";
+                    WorkstationAccessText = Config.RequireWebAccessKey
+                        ? $"其他电脑查视频：{MonitorAccessAddress}（访问保护已开启）"
+                        : $"其他电脑查视频：{MonitorAccessAddress}";
                 WorkstationPrintStatusText = orders.Any(x => x.IsTest)
                     ? $"快递单打印工位：{DateTime.Now:HH:mm} 收到测试订单"
                     : $"快递单打印工位：{DateTime.Now:HH:mm} 收到订单";

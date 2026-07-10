@@ -27,6 +27,7 @@ public sealed class ConfigurationAndScannerTests
         Assert.Equal(600, config.ScannerAutoSubmitQuietMs);
         Assert.Equal(10, config.ScannerAutoSubmitMaxAverageIntervalMs);
         Assert.Equal(150, config.ScannerAutoSubmitMaxKeyIntervalMs);
+        Assert.Equal(32, config.WebAccessKey.Length);
     }
 
     [Theory]

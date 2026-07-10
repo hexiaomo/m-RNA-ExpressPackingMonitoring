@@ -1,5 +1,6 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using System.Collections.Generic;
+using System.Security.Cryptography;
 using System.Text.Json.Serialization;
 
 namespace ExpressPackingMonitoring.Config
@@ -128,6 +129,8 @@ namespace ExpressPackingMonitoring.Config
         public bool EnableWebServer { get; set; } = true;
         public int WebServerPort { get; set; } = 5280;
         public int TranscodeCacheMaxMB { get; set; } = 1024;  // 转码缓存上限(MB)，超出后按时间清理最旧的
+        public bool RequireWebAccessKey { get; set; } = false;
+        public string WebAccessKey { get; set; } = "";
 
         // AI 语音合成
         public bool EnableAiTts { get; set; } = true;
@@ -156,6 +159,17 @@ namespace ExpressPackingMonitoring.Config
         public static bool NormalizeAfterLoad(AppConfig config)
         {
             bool changed = false;
+
+            if (string.IsNullOrWhiteSpace(config.WebAccessKey) || config.WebAccessKey.Trim().Length < 16)
+            {
+                config.WebAccessKey = Convert.ToHexString(RandomNumberGenerator.GetBytes(16)).ToLowerInvariant();
+                changed = true;
+            }
+            else if (!string.Equals(config.WebAccessKey, config.WebAccessKey.Trim(), StringComparison.Ordinal))
+            {
+                config.WebAccessKey = config.WebAccessKey.Trim();
+                changed = true;
+            }
 
             string normalizedEngine = NormalizeAiTtsEngine(config.AiTtsEngine);
             if (config.AiTtsEngine != normalizedEngine)

@@ -2080,6 +2080,42 @@
                                                             Increment="1"/>
                                     </Grid>
 
+                                    <Grid Style="{StaticResource SettingRowStyle}">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="24"/>
+                                            <ColumnDefinition Width="260"/>
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Margin="0,0,16,0">
+                                            <TextBlock Text="保护录像网页" Style="{StaticResource FieldLabelStyle}"/>
+                                            <TextBlock Text="访问录像、播放和剪辑时验证专用链接，订单插件不受影响"
+                                                       Style="{StaticResource FieldHintStyle}"/>
+                                        </StackPanel>
+                                        <CheckBox Grid.Column="2"
+                                                  IsChecked="{Binding Config.RequireWebAccessKey}"
+                                                  VerticalAlignment="Center"
+                                                  HorizontalAlignment="Left"
+                                                  Style="{StaticResource ToggleSwitchStyle}"/>
+                                    </Grid>
+
+                                    <Grid Style="{StaticResource SettingRowStyle}"
+                                          ToolTip="访问密钥会包含在复制的完整访问链接中，请不要发送给无关人员">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="24"/>
+                                            <ColumnDefinition Width="260"/>
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Margin="0,0,16,0">
+                                            <TextBlock Text="录像网页访问密钥" Style="{StaticResource FieldLabelStyle}"/>
+                                            <TextBlock Text="至少 16 个字符；留空会自动生成，修改后旧链接立即失效"
+                                                       Style="{StaticResource FieldHintStyle}"/>
+                                        </StackPanel>
+                                        <TextBox Grid.Column="2"
+                                                 MaxLength="128"
+                                                 IsEnabled="{Binding Config.RequireWebAccessKey}"
+                                                 Text="{Binding Config.WebAccessKey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                                    </Grid>
+
                                     <Grid Style="{StaticResource SettingRowLastStyle}"
                                           ToolTip="缓存包含在线播放转码、剪辑预览图和剪辑下载文件，超出上限后会自动清理最旧文件">
                                         <Grid.ColumnDefinitions>

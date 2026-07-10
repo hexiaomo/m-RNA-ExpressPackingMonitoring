@@ -8,6 +8,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Net;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Threading;
@@ -43,6 +44,8 @@ namespace ExpressPackingMonitoring.Services
         private readonly Func<string> _currentRecordingFileProvider;
         private readonly Func<VideoRecord, MkvConversionResult> _mkvConverter;
         private readonly VideoClipService _clipService;
+        private readonly bool _requireAccessKey;
+        private readonly string _accessKey;
         private readonly CancellationTokenSource _cts = new();
         private readonly SemaphoreSlim _requestSlots = new(32, 32);
         private Task _listenTask;
@@ -80,12 +83,22 @@ namespace ExpressPackingMonitoring.Services
             catch { }
         }
 
-        public WebServer(VideoDatabase db, int port = 5280, int transCacheMaxMB = 1024, Func<bool> isRecordingProvider = null, Func<VideoRecord, MkvConversionResult> mkvConverter = null, Func<string> currentRecordingFileProvider = null)
+        public WebServer(
+            VideoDatabase db,
+            int port = 5280,
+            int transCacheMaxMB = 1024,
+            Func<bool> isRecordingProvider = null,
+            Func<VideoRecord, MkvConversionResult> mkvConverter = null,
+            Func<string> currentRecordingFileProvider = null,
+            bool requireAccessKey = false,
+            string accessKey = null)
         {
             _db = db ?? throw new ArgumentNullException(nameof(db));
             _isRecordingProvider = isRecordingProvider ?? (() => false);
             _currentRecordingFileProvider = currentRecordingFileProvider ?? (() => null);
             _mkvConverter = mkvConverter;
+            _requireAccessKey = requireAccessKey;
+            _accessKey = accessKey?.Trim() ?? "";
             _clipService = new VideoClipService(_db, WriteLog, _mkvConverter, IsCurrentRecordingFile, () => Task.Run(CleanWebCache));
             Port = port;
             _transCacheMaxBytes = (long)transCacheMaxMB * 1024 * 1024;
@@ -226,7 +239,7 @@ namespace ExpressPackingMonitoring.Services
 
                 ApplyCorsHeaders(ctx);
                 ctx.Response.Headers.Add("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-                ctx.Response.Headers.Add("Access-Control-Allow-Headers", "Content-Type");
+                ctx.Response.Headers.Add("Access-Control-Allow-Headers", "Content-Type, X-EPM-Access-Key");
 
                 if (method == "POST")
                 {
@@ -243,6 +256,24 @@ namespace ExpressPackingMonitoring.Services
                     ctx.Response.StatusCode = 204;
                     ctx.Response.OutputStream.Close();
                     return;
+                }
+
+                if (_requireAccessKey && RequiresAccessKey(path))
+                {
+                    bool authorized = TryAuthorizeRequest(ctx, out bool authorizedByQuery);
+                    if (!authorized)
+                    {
+                        SendUnauthorized(ctx, path);
+                        return;
+                    }
+
+                    if (authorizedByQuery && path == "")
+                    {
+                        ctx.Response.StatusCode = 302;
+                        ctx.Response.RedirectLocation = "/";
+                        ctx.Response.OutputStream.Close();
+                        return;
+                    }
                 }
 
                 switch (path)
@@ -325,6 +356,79 @@ namespace ExpressPackingMonitoring.Services
             ctx.Response.Headers["Vary"] = "Origin";
         }
 
+        private static bool RequiresAccessKey(string path)
+        {
+            return path == ""
+                || path.StartsWith("/api/videos", StringComparison.OrdinalIgnoreCase)
+                || path.StartsWith("/api/clip", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private bool TryAuthorizeRequest(HttpListenerContext ctx, out bool authorizedByQuery)
+        {
+            authorizedByQuery = false;
+            if (string.IsNullOrWhiteSpace(_accessKey)) return false;
+
+            string headerKey = ctx.Request.Headers["X-EPM-Access-Key"];
+            if (AccessKeysEqual(headerKey, _accessKey))
+                return true;
+
+            string queryKey = ctx.Request.QueryString["key"];
+            if (AccessKeysEqual(queryKey, _accessKey))
+            {
+                authorizedByQuery = true;
+                SetAccessCookie(ctx);
+                return true;
+            }
+
+            string cookieValue = ctx.Request.Cookies["EPM_WEB_ACCESS"]?.Value;
+            return AccessKeysEqual(cookieValue, ComputeAccessCookieValue(_accessKey));
+        }
+
+        private void SetAccessCookie(HttpListenerContext ctx)
+        {
+            var cookie = new Cookie("EPM_WEB_ACCESS", ComputeAccessCookieValue(_accessKey), "/")
+            {
+                HttpOnly = true,
+                Expires = DateTime.UtcNow.AddDays(30)
+            };
+            ctx.Response.SetCookie(cookie);
+        }
+
+        internal static bool AccessKeysEqual(string left, string right)
+        {
+            if (string.IsNullOrEmpty(left) || string.IsNullOrEmpty(right)) return false;
+            byte[] leftHash = SHA256.HashData(Encoding.UTF8.GetBytes(left));
+            byte[] rightHash = SHA256.HashData(Encoding.UTF8.GetBytes(right));
+            return CryptographicOperations.FixedTimeEquals(leftHash, rightHash);
+        }
+
+        private static string ComputeAccessCookieValue(string accessKey)
+        {
+            return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(accessKey))).ToLowerInvariant();
+        }
+
+        private static void SendUnauthorized(HttpListenerContext ctx, string path)
+        {
+            if (path == "")
+            {
+                const string html = """
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"><title>需要访问链接</title></head>
+<body style="font-family:Microsoft YaHei UI,sans-serif;padding:32px;color:#172033">
+<h1>此监控网页已启用访问保护</h1><p>请在监控端点击“复制并打开监控网页”，使用复制的完整链接访问。</p>
+</body></html>
+""";
+                byte[] bytes = Encoding.UTF8.GetBytes(html);
+                ctx.Response.StatusCode = 401;
+                ctx.Response.ContentType = "text/html; charset=utf-8";
+                ctx.Response.ContentLength64 = bytes.Length;
+                ctx.Response.OutputStream.Write(bytes, 0, bytes.Length);
+                ctx.Response.OutputStream.Close();
+                return;
+            }
+
+            SendJson(ctx, 401, new { error = "需要有效的监控网页访问链接" });
+        }
+
         private static bool IsAllowedCorsOrigin(string origin)
         {
             if (!Uri.TryCreate(origin, UriKind.Absolute, out var uri))
@@ -376,6 +480,7 @@ namespace ExpressPackingMonitoring.Services
                     SendJson(ctx, 400, new { error = "空数据" });
                     return;
                 }
+
                 ValidateOrderInfoItems(items);
 
                 int count = 0;

@@ -5,6 +5,15 @@ namespace ExpressPackingMonitoring.Tests;
 
 public sealed class WebRequestLimitTests
 {
+    [Theory]
+    [InlineData("secret-key", "secret-key", true)]
+    [InlineData("secret-key", "SECRET-KEY", false)]
+    [InlineData("", "secret-key", false)]
+    public void AccessKeysEqual_UsesExactComparison(string left, string right, bool expected)
+    {
+        Assert.Equal(expected, WebServer.AccessKeysEqual(left, right));
+    }
+
     [Fact]
     public void ValidateOrderInfoItems_AcceptsBoundarySizedBatch()
     {
