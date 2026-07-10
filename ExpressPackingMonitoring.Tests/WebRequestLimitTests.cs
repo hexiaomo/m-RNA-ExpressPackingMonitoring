@@ -14,6 +14,16 @@ public sealed class WebRequestLimitTests
         Assert.Equal(expected, WebServer.AccessKeysEqual(left, right));
     }
 
+    [Theory]
+    [InlineData("1", true)]
+    [InlineData("0", false)]
+    [InlineData("true", false)]
+    [InlineData(null, false)]
+    public void ShouldServeClipInline_OnlyAcceptsExplicitFlag(string? value, bool expected)
+    {
+        Assert.Equal(expected, WebServer.ShouldServeClipInline(value));
+    }
+
     [Fact]
     public void ValidateOrderInfoItems_AcceptsBoundarySizedBatch()
     {

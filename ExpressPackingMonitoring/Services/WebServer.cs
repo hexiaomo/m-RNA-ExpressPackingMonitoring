@@ -1407,7 +1407,12 @@ namespace ExpressPackingMonitoring.Services
                 return;
             }
 
-            ServeFileWithRange(ctx, filePath, inline: false);
+            ServeFileWithRange(ctx, filePath, inline: ShouldServeClipInline(ctx.Request.QueryString["inline"]));
+        }
+
+        internal static bool ShouldServeClipInline(string value)
+        {
+            return string.Equals(value, "1", StringComparison.Ordinal);
         }
 
         private void HandleServeClipPreview(HttpListenerContext ctx, string path)

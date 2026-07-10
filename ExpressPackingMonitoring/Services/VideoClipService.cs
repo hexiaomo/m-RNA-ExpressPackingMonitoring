@@ -254,6 +254,7 @@ namespace ExpressPackingMonitoring.Services
                 Message = "剪辑任务已排队，请稍候……",
                 OutputPath = outputPath,
                 DownloadUrl = "/api/clips/" + Uri.EscapeDataString(outputName),
+                PlayUrl = "/api/clips/" + Uri.EscapeDataString(outputName) + "?inline=1",
                 CreatedAtUtc = DateTime.UtcNow
             };
             lock (_taskRegistrationLock)
@@ -281,7 +282,8 @@ namespace ExpressPackingMonitoring.Services
                     Success = !string.Equals(task.Status, "failed", StringComparison.OrdinalIgnoreCase),
                     Status = task.Status,
                     Message = task.Message,
-                    DownloadUrl = completed ? task.DownloadUrl : ""
+                    DownloadUrl = completed ? task.DownloadUrl : "",
+                    PlayUrl = completed ? task.PlayUrl : ""
                 };
             }
         }
@@ -814,6 +816,7 @@ namespace ExpressPackingMonitoring.Services
             public string Message { get; set; }
             public string OutputPath { get; set; }
             public string DownloadUrl { get; set; }
+            public string PlayUrl { get; set; }
             public bool CancelRequested { get; set; }
             public Process Process { get; set; }
             public DateTime CreatedAtUtc { get; set; }
@@ -841,6 +844,7 @@ namespace ExpressPackingMonitoring.Services
         public string Status { get; set; }
         public string Message { get; set; }
         public string DownloadUrl { get; set; } = "";
+        public string PlayUrl { get; set; } = "";
     }
 
     public sealed class ClipTimelineResult
