@@ -43,7 +43,7 @@ echo Baseline version: %BASELINE_VERSION%
 echo Baseline app:     %BASELINE_APP_DIR%
 echo.
 
-powershell -NoProfile -ExecutionPolicy Bypass -File "Tools\Publish-CleanPackage.ps1" ^
+pwsh -NoProfile -ExecutionPolicy Bypass -File "Tools\Publish-CleanPackage.ps1" ^
   %VERSION_ARG% ^
   -PatchBaselineVersion %BASELINE_VERSION% ^
   -BaselineAppDir "%BASELINE_APP_DIR%" ^

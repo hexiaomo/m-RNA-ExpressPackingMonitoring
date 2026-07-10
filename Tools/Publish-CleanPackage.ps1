@@ -8,6 +8,7 @@ param(
     [string]$BaselineLauncherPath = "",
     [string]$BaselineLauncherManifestPath = "",
     [string]$PatchBaselineVersion = "0.0.18",
+    [switch]$SkipTtsCacheGeneration,
     [switch]$DisablePatch
 )
 
@@ -16,11 +17,60 @@ $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $appProject = Join-Path $repoRoot "ExpressPackingMonitoring\ExpressPackingMonitoring.csproj"
 $launcherProject = Join-Path $repoRoot "ExpressPackingMonitoring.Launcher\ExpressPackingMonitoring.Launcher.csproj"
+$ttsCacheBuilderProject = Join-Path $repoRoot "Tools\ExpressPackingMonitoring.TtsCacheBuilder\ExpressPackingMonitoring.TtsCacheBuilder.csproj"
 
 function Invoke-DotNetPublish {
-    dotnet publish @args
+    param([string[]]$Arguments)
+
+    & dotnet publish @Arguments
     if ($LASTEXITCODE -ne 0) {
         throw "dotnet publish failed with exit code $LASTEXITCODE"
+    }
+}
+
+function New-DefaultTtsCache {
+    $targetDir = Join-Path $repoRoot "package\tts_cache"
+    if ($SkipTtsCacheGeneration) {
+        Write-Host "Default TTS cache generation skipped by option."
+        return
+    }
+
+    if (-not (Test-Path $ttsCacheBuilderProject)) {
+        throw "TTS cache builder project not found: $ttsCacheBuilderProject"
+    }
+
+    $tempDir = Join-Path $repoRoot "package\.tts_cache_generation"
+    if (Test-Path $tempDir) {
+        Remove-Item -LiteralPath $tempDir -Recurse -Force
+    }
+    New-Item -ItemType Directory -Force -Path $tempDir | Out-Null
+    if (Test-Path $targetDir) {
+        Copy-Item -Path (Join-Path $targetDir "*") -Destination $tempDir -Recurse -Force
+    }
+
+    try {
+        Write-Host "Generating default TTS cache..."
+        dotnet run --project $ttsCacheBuilderProject -c $Configuration -- $tempDir
+        if ($LASTEXITCODE -ne 0) {
+            throw "Default TTS cache generation failed with exit code $LASTEXITCODE"
+        }
+
+        $cacheFiles = @(Get-ChildItem -LiteralPath $tempDir -File |
+            Where-Object { $_.Extension -in ".mp3", ".wav" })
+        if ($cacheFiles.Count -eq 0) {
+            throw "Default TTS cache generation produced no audio files."
+        }
+
+        if (Test-Path $targetDir) {
+            Remove-Item -LiteralPath $targetDir -Recurse -Force
+        }
+        Move-Item -LiteralPath $tempDir -Destination $targetDir
+        Write-Host "Default TTS cache generated: $($cacheFiles.Count) files"
+    }
+    finally {
+        if (Test-Path $tempDir) {
+            Remove-Item -LiteralPath $tempDir -Recurse -Force
+        }
     }
 }
 
@@ -466,25 +516,31 @@ $launcherBaseIntermediate = Join-Path $repoRoot "ExpressPackingMonitoring.Launch
 $gitCommitId = Get-GitCommitId
 $packageUpdateCheckUrl = Get-ConfiguredValue -Key "UPDATE_CHECK_URL" -DefaultValue "https://api.github.com/repos/m-RNA/ExpressPackingMonitoring/releases/latest"
 
-Invoke-DotNetPublish $appProject `
-    -c $Configuration `
-    -r $Runtime `
-    --self-contained true `
-    -p:InformationalVersion=$packageVersion `
-    -p:GitCommitId=$gitCommitId `
-    -p:PublishSingleFile=false `
-    -p:BaseOutputPath=$appBaseOutput `
-    -p:BaseIntermediateOutputPath=$appBaseIntermediate `
-    -p:PublishDir="$appPublishDir\"
+New-DefaultTtsCache
 
-Invoke-DotNetPublish $launcherProject `
-    -c $Configuration `
-    -r $Runtime `
-    --self-contained true `
-    -p:BaseOutputPath=$launcherBaseOutput `
-    -p:BaseIntermediateOutputPath=$launcherBaseIntermediate `
-    -p:LauncherDefaultUpdateCheckUrl=$packageUpdateCheckUrl `
-    -p:PublishDir="$outputFullPath\"
+Invoke-DotNetPublish -Arguments @(
+    $appProject,
+    "-c", $Configuration,
+    "-r", $Runtime,
+    "--self-contained", "true",
+    "-p:InformationalVersion=$packageVersion",
+    "-p:GitCommitId=$gitCommitId",
+    "-p:PublishSingleFile=false",
+    "-p:BaseOutputPath=$appBaseOutput",
+    "-p:BaseIntermediateOutputPath=$appBaseIntermediate",
+    "-p:PublishDir=$appPublishDir\"
+)
+
+Invoke-DotNetPublish -Arguments @(
+    $launcherProject,
+    "-c", $Configuration,
+    "-r", $Runtime,
+    "--self-contained", "true",
+    "-p:BaseOutputPath=$launcherBaseOutput",
+    "-p:BaseIntermediateOutputPath=$launcherBaseIntermediate",
+    "-p:LauncherDefaultUpdateCheckUrl=$packageUpdateCheckUrl",
+    "-p:PublishDir=$outputFullPath\"
+)
 
 $launcherExe = Join-Path $outputFullPath "ExpressPackingMonitoring.exe"
 if (-not (Test-Path $launcherExe)) {
@@ -503,6 +559,11 @@ Get-ChildItem -LiteralPath $outputFullPath -File -ErrorAction SilentlyContinue |
 
 Remove-PackageRuntimeState -AppDir $appPublishDir
 Copy-PackageTtsCache -AppDir $appPublishDir
+$publishedTtsCacheFiles = @(Get-ChildItem -LiteralPath (Join-Path $appPublishDir "tts_cache") -File -ErrorAction SilentlyContinue |
+    Where-Object { $_.Extension -in ".mp3", ".wav" })
+if (-not $SkipTtsCacheGeneration -and $publishedTtsCacheFiles.Count -eq 0) {
+    throw "Clean package validation failed: default TTS cache is empty"
+}
 
 $launcherExe = Join-Path $outputFullPath "ExpressPackingMonitoring.exe"
 $appExe = Join-Path $appPublishDir "ExpressPackingMonitoring.exe"
@@ -580,11 +641,22 @@ else {
     $launcherChanged = [string]::IsNullOrWhiteSpace($baselineLauncherFingerprint) -or
         -not [string]::Equals($launcherSourceFingerprint, $baselineLauncherFingerprint, [System.StringComparison]::OrdinalIgnoreCase)
     if ($launcherChanged) {
+        $baselineTag = "v$normalizedPatchBaselineVersion"
+        & git -C $repoRoot rev-parse --verify --quiet "$baselineTag^{commit}" 2>$null | Out-Null
+        if ($LASTEXITCODE -eq 0) {
+            & git -C $repoRoot diff --quiet $baselineTag -- @launcherFingerprintFiles
+            if ($LASTEXITCODE -eq 0) {
+                $launcherChanged = $false
+                $launcherCheckInfo = "Launcher manifest byte fingerprint differs, but tracked launcher sources match $baselineTag."
+            }
+        }
+    }
+    if ($launcherChanged) {
         $launcherCheckInfo = ConvertFrom-Utf8Base64 "5ZCv5Yqo5Zmo5rqQ56CB5oyH57q55bey5Y+Y5YyW77yM5bey56aB55So5aKe6YeP5pu05paw44CC"
         $patchReason = ConvertFrom-Utf8Base64 "5pyq55Sf5oiQ5aKe6YeP5YyF77ya5ZCv5Yqo5Zmo5rqQ56CB5oyH57q55bey5Y+Y5YyW77yM6K+35omL5Yqo5LiL6L295a6M5pW05YyF44CC"
         $launcherPatchBlocked = $true
     }
-    else {
+    elseif ([string]::IsNullOrWhiteSpace($launcherCheckInfo)) {
         $launcherCheckInfo = ConvertFrom-Utf8Base64 "5ZCv5Yqo5Zmo5rqQ56CB5oyH57q55bey6YCa6L+H77yM5ZCv5Yqo5Zmo5pyq5Y+Y5YyW44CC"
     }
 }

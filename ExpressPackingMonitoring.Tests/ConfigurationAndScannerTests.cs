@@ -1,5 +1,8 @@
 using ExpressPackingMonitoring.Config;
+using ExpressPackingMonitoring.Audio;
 using ExpressPackingMonitoring.Input;
+using ExpressPackingMonitoring.Services;
+using ExpressPackingMonitoring.ViewModels;
 using Xunit;
 
 namespace ExpressPackingMonitoring.Tests;
@@ -46,5 +49,196 @@ public sealed class ConfigurationAndScannerTests
             maxKeyIntervalMs: 100);
 
         Assert.Equal(expected, actual);
+    }
+
+    [Theory]
+    [InlineData("发货", true, true, true)]
+    [InlineData("退货", true, true, true)]
+    [InlineData("发货", false, true, false)]
+    [InlineData("退货", false, true, false)]
+    [InlineData("发货", true, false, false)]
+    [InlineData("其他", true, true, false)]
+    public void ShouldAlertPrintedRefund_AlertsEnabledShippingAndReturnScans(
+        string mode,
+        bool alertEnabled,
+        bool isPrintedRefund,
+        bool expected)
+    {
+        var orderInfo = new OrderInfo { IsPrintedRefund = isPrintedRefund };
+
+        bool actual = MainViewModel.ShouldAlertPrintedRefund(mode, alertEnabled, orderInfo);
+
+        Assert.Equal(expected, actual);
+    }
+
+    [Theory]
+    [InlineData("NO_REFUND", false)]
+    [InlineData("WAIT_SELLER_AGREE", true)]
+    [InlineData("WAIT_BUYER_RETURN_GOODS", true)]
+    [InlineData("WAIT_SELLER_CONFIRM_GOODS", true)]
+    [InlineData("SUCCESS", true)]
+    [InlineData("CLOSED", true)]
+    public void ShouldAlertPrintedRefund_UsesRefundStatus(string refundStatus, bool expected)
+    {
+        var orderInfo = new OrderInfo
+        {
+            IsPrintedRefund = true,
+            RefundStatus = refundStatus
+        };
+
+        Assert.Equal(expected, MainViewModel.ShouldAlertPrintedRefund("发货", true, orderInfo));
+    }
+
+    [Theory]
+    [InlineData("NO_REFUND", "无退款")]
+    [InlineData("WAIT_SELLER_AGREE", DefaultSpeechCatalog.RefundWaitingSeller)]
+    [InlineData("WAIT_BUYER_RETURN_GOODS", DefaultSpeechCatalog.RefundWaitingBuyerReturn)]
+    [InlineData("WAIT_SELLER_CONFIRM_GOODS", DefaultSpeechCatalog.RefundWaitingSellerConfirm)]
+    [InlineData("SUCCESS", DefaultSpeechCatalog.RefundCompleted)]
+    [InlineData("CLOSED", DefaultSpeechCatalog.RefundClosed)]
+    public void GetRefundStatusDisplayText_MapsKnownStatuses(string refundStatus, string expected)
+    {
+        var orderInfo = new OrderInfo { RefundStatus = refundStatus };
+
+        Assert.Equal(expected, MainViewModel.GetRefundStatusDisplayText(orderInfo));
+    }
+
+    [Fact]
+    public void GetPrintedRefundLookupDelay_RequestsImmediatelyThenThrottlesForFiveSeconds()
+    {
+        DateTime now = new(2026, 7, 11, 12, 0, 0, DateTimeKind.Utc);
+
+        Assert.Equal(TimeSpan.Zero, MainViewModel.GetPrintedRefundLookupDelay(DateTime.MinValue, now));
+        Assert.Equal(TimeSpan.FromSeconds(3), MainViewModel.GetPrintedRefundLookupDelay(now.AddSeconds(-2), now));
+        Assert.Equal(TimeSpan.Zero, MainViewModel.GetPrintedRefundLookupDelay(now.AddSeconds(-5), now));
+    }
+
+    [Fact]
+    public void AlertService_CriticalAlertBlocksNormalAlertUntilDisplayEnds()
+    {
+        DateTime now = new(2026, 7, 11, 12, 0, 0, DateTimeKind.Utc);
+        var presented = new List<string>();
+        var played = new List<string>();
+        using var alerts = new AlertService(
+            request => presented.Add(request.Message),
+            request => played.Add(request.SpeechText),
+            () => now);
+
+        AlertPublishResult criticalResult = alerts.Publish(new AlertRequest
+        {
+            Message = "退款警告",
+            SpeechText = "退款语音",
+            Priority = AlertPriority.Critical,
+            DisplayDuration = TimeSpan.FromSeconds(12)
+        });
+        AlertPublishResult blockedResult = alerts.Publish(new AlertRequest
+        {
+            Message = "重复单号",
+            SpeechText = "重复单号",
+            Priority = AlertPriority.Normal
+        });
+
+        now = now.AddSeconds(12);
+        AlertPublishResult acceptedAfterExpiry = alerts.Publish(new AlertRequest
+        {
+            Message = "没有单号",
+            SpeechText = "没有单号",
+            Priority = AlertPriority.Normal
+        });
+
+        Assert.Equal(AlertPublishResult.Accepted, criticalResult);
+        Assert.Equal(AlertPublishResult.DroppedByHigherPriority, blockedResult);
+        Assert.Equal(AlertPublishResult.Accepted, acceptedAfterExpiry);
+        Assert.Equal(new[] { "退款警告", "没有单号" }, presented);
+        Assert.Equal(new[] { "退款语音", "没有单号" }, played);
+    }
+
+    [Fact]
+    public void AlertService_DeduplicatesWithinConfiguredWindow()
+    {
+        DateTime now = new(2026, 7, 11, 12, 0, 0, DateTimeKind.Utc);
+        int presentationCount = 0;
+        using var alerts = new AlertService(_ => presentationCount++, _ => { }, () => now);
+        var request = new AlertRequest
+        {
+            Message = "重复单号",
+            SpeechText = "重复单号",
+            DeduplicationKey = "duplicate:123",
+            DeduplicationWindow = TimeSpan.FromSeconds(3)
+        };
+
+        Assert.Equal(AlertPublishResult.Accepted, alerts.Publish(request));
+        Assert.Equal(AlertPublishResult.DroppedAsDuplicate, alerts.Publish(request));
+        now = now.AddSeconds(3);
+        Assert.Equal(AlertPublishResult.Accepted, alerts.Publish(request));
+        Assert.Equal(2, presentationCount);
+    }
+
+    [Fact]
+    public void AlertService_ForwardsIndustrialAlarmOnceAndRefundSpeechThreeTimes()
+    {
+        AlertRequest? playedRequest = null;
+        using var alerts = new AlertService(_ => { }, request => playedRequest = request);
+        var refundAlert = new AlertRequest
+        {
+            Message = "退款警告",
+            SpeechText = "订单有退款，不要打包",
+            Priority = AlertPriority.Critical,
+            Sound = AlertSound.IndustrialAlarm,
+            SoundRepeatCount = 1,
+            SpeechRepeatCount = 3
+        };
+
+        Assert.Equal(AlertPublishResult.Accepted, alerts.Publish(refundAlert));
+        Assert.NotNull(playedRequest);
+        Assert.Equal(AlertSound.IndustrialAlarm, playedRequest.Sound);
+        Assert.Equal(1, playedRequest.SoundRepeatCount);
+        Assert.Equal(3, playedRequest.SpeechRepeatCount);
+    }
+
+    [Fact]
+    public void AlertService_VoiceOnlyRequestDoesNotReplaceVisualMessage()
+    {
+        int presentationCount = 0;
+        AlertRequest? playedRequest = null;
+        using var alerts = new AlertService(
+            _ => presentationCount++,
+            request => playedRequest = request);
+
+        alerts.Publish(new AlertRequest
+        {
+            SpeechText = "开始录制",
+            VoiceStyle = AlertVoiceStyle.Normal,
+            Sound = AlertSound.None,
+            DisplayDuration = TimeSpan.Zero
+        });
+
+        Assert.Equal(0, presentationCount);
+        Assert.NotNull(playedRequest);
+        Assert.Equal(AlertVoiceStyle.Normal, playedRequest.VoiceStyle);
+        Assert.Equal(AlertSound.None, playedRequest.Sound);
+    }
+
+    [Fact]
+    public void DefaultSpeechCatalog_ContainsAllFixedRefundAnnouncementsWithoutDuplicates()
+    {
+        string[] expectedRefundPrompts =
+        [
+            DefaultSpeechCatalog.CreatePrintedRefundAnnouncement(DefaultSpeechCatalog.RefundWaitingSeller),
+            DefaultSpeechCatalog.CreatePrintedRefundAnnouncement(DefaultSpeechCatalog.RefundWaitingBuyerReturn),
+            DefaultSpeechCatalog.CreatePrintedRefundAnnouncement(DefaultSpeechCatalog.RefundWaitingSellerConfirm),
+            DefaultSpeechCatalog.CreatePrintedRefundAnnouncement(DefaultSpeechCatalog.RefundCompleted),
+            DefaultSpeechCatalog.CreatePrintedRefundAnnouncement(DefaultSpeechCatalog.RefundClosed)
+        ];
+
+        Assert.Equal(
+            DefaultSpeechCatalog.Prompts.Count,
+            DefaultSpeechCatalog.Prompts.Select(prompt => (prompt.Text, prompt.VoiceStyle)).Distinct().Count());
+        foreach (string prompt in expectedRefundPrompts)
+        {
+            Assert.Contains(
+                DefaultSpeechCatalog.Prompts,
+                item => item.Text == prompt && item.VoiceStyle == AlertVoiceStyle.Warning);
+        }
     }
 }

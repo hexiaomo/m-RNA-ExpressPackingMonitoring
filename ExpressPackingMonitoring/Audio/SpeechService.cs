@@ -1,4 +1,5 @@
 using ExpressPackingMonitoring.Config;
+using ExpressPackingMonitoring.Services;
 using System;
 using System.Collections.Generic;
 using System.Collections.Concurrent;
@@ -24,6 +25,11 @@ namespace ExpressPackingMonitoring.Audio
         public int RepeatCount { get; set; } = 1;
         public bool PreferImmediateAiGeneration { get; set; }
         public bool PlayRemarkTone { get; set; }
+        public bool PlayWarningTonePerRepeat { get; set; }
+        public bool IsCriticalWarning { get; set; }
+        public bool UseIndustrialAlarm { get; set; }
+        public bool PlayWarningTone { get; set; }
+        public int AlertToneRepeatCount { get; set; } = 1;
     }
 
     public class SpeechService : IDisposable
@@ -52,6 +58,7 @@ namespace ExpressPackingMonitoring.Audio
         private volatile bool _pauseForRecordingRequested;
         private DateTime _lastCacheCleanupTime = DateTime.MinValue;
         private long _cacheBytesSinceCleanup;
+        private int _criticalWarningCount;
 
         /// <summary>AI TTS 模型空闲多少分钟后自动卸载释放内存，0 = 不自动卸载</summary>
         public int AiTtsIdleUnloadMinutes { get; set; } = 1;
@@ -76,8 +83,11 @@ namespace ExpressPackingMonitoring.Audio
 
         private bool IsEdgeTtsEngine => string.Equals(AiTtsEngine, "Edge", StringComparison.OrdinalIgnoreCase);
 
-        public SpeechService()
+        public SpeechService(string? cacheDirectory = null)
         {
+            _ttsCacheDir = string.IsNullOrWhiteSpace(cacheDirectory)
+                ? null
+                : Path.GetFullPath(cacheDirectory);
             InitSpeechSynthesizer();
         }
 
@@ -120,14 +130,22 @@ namespace ExpressPackingMonitoring.Audio
             }
         }
 
-        private void EnqueueSpeechRequest(SpeechRequest request)
+        private bool EnqueueSpeechRequest(SpeechRequest request)
         {
-            if (_isDisposed) return;
+            if (_isDisposed) return false;
 
             var queue = _speechQueue;
-            if (queue == null || queue.IsAddingCompleted) return;
+            if (queue == null || queue.IsAddingCompleted) return false;
 
-            try { queue.Add(request); } catch { }
+            try
+            {
+                queue.Add(request);
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
         }
 
 
@@ -249,13 +267,32 @@ namespace ExpressPackingMonitoring.Audio
 
                     try
                     {
+                        if (req.IsWarning && req.PlayWarningTonePerRepeat && req.RepeatCount > 1)
+                        {
+                            for (int i = 0; i < req.RepeatCount; i++)
+                            {
+                                PlayWarningAlertToneBlocking();
+                                if (_speechCancelRequested || _isDisposed) break;
+                                SpeakRequestText(req.Text, req);
+                                if (_speechCancelRequested || _isDisposed) break;
+                            }
+                            continue;
+                        }
+
                         string fullText = req.RepeatCount > 1
                             ? string.Join("，", Enumerable.Repeat(req.Text, req.RepeatCount))
                             : req.Text;
 
-                        if (req.IsWarning)
+                        if (req.PlayWarningTone || req.UseIndustrialAlarm)
                         {
-                            PlayWarningAlertToneBlocking();
+                            for (int i = 0; i < Math.Max(1, req.AlertToneRepeatCount); i++)
+                            {
+                                if (req.UseIndustrialAlarm)
+                                    PlayIndustrialAlarmBlocking();
+                                else
+                                    PlayWarningAlertToneBlocking();
+                                if (_speechCancelRequested || _isDisposed) break;
+                            }
                             if (_speechCancelRequested || _isDisposed) continue;
                         }
                         else if (req.PlayRemarkTone)
@@ -264,23 +301,29 @@ namespace ExpressPackingMonitoring.Audio
                             if (_speechCancelRequested || _isDisposed) continue;
                         }
 
-                        if (EnableAiTts)
-                        {
-                            SpeakWithAiTts(fullText, req.IsWarning, req.PreferImmediateAiGeneration);
-                        }
-                        else
-                        {
-                            SpeakWithWindowsTts(fullText, req.IsWarning);
-                        }
+                        SpeakRequestText(fullText, req);
                     }
                     catch (Exception ex)
                     {
                         Debug.WriteLine($"[SpeechService] Playback error: {ex.Message}");
                     }
+                    finally
+                    {
+                        if (req.IsCriticalWarning)
+                            Interlocked.Decrement(ref _criticalWarningCount);
+                    }
                 }
             }
             catch (OperationCanceledException) { }
             catch (Exception ex) { Debug.WriteLine($"[SpeechService] Thread error: {ex.Message}"); }
+        }
+
+        private void SpeakRequestText(string text, SpeechRequest request)
+        {
+            if (EnableAiTts)
+                SpeakWithAiTts(text, request.IsWarning, request.PreferImmediateAiGeneration);
+            else
+                SpeakWithWindowsTts(text, request.IsWarning);
         }
 
         private bool SpeakWithWindowsTts(string text, bool isWarning)
@@ -685,6 +728,20 @@ namespace ExpressPackingMonitoring.Audio
             PreGenerateCacheInternal(text, isWarning);
         }
 
+        public bool GenerateCacheNow(string text, bool isWarning = false)
+        {
+            if (!EnableAiTts || string.IsNullOrWhiteSpace(text))
+                return false;
+
+            EnsureTtsCacheDir();
+            text = PreprocessTextForTts(text);
+            string voiceKey = GetCurrentVoiceKey(isWarning);
+            string extension = IsEdgeTtsEngine ? ".mp3" : ".wav";
+            string cacheKey = GetCacheKey(text, AiTtsSpeed, voiceKey, AiTtsEngine);
+            string cachePath = Path.Combine(_ttsCacheDir!, cacheKey + extension);
+            return File.Exists(cachePath) || TryGenerateAiCache(text, isWarning, cachePath);
+        }
+
         /// <summary>内部版本，text 已预处理，避免重复预处理</summary>
         private void PreGenerateCacheInternal(string text, bool isWarning)
         {
@@ -1026,6 +1083,55 @@ namespace ExpressPackingMonitoring.Audio
             return BuildWav16(samples, sampleRate);
         }
 
+        private void PlayIndustrialAlarmBlocking()
+        {
+            try
+            {
+                PlayWavBlocking(GetIndustrialAlarmWav());
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[SpeechService] Industrial alarm playback error: {ex.Message}");
+            }
+        }
+
+        private static byte[] GetIndustrialAlarmWav()
+        {
+            return _industrialAlarmWav ??= BuildIndustrialAlarmWav();
+        }
+
+        private static byte[] BuildIndustrialAlarmWav()
+        {
+            const int sampleRate = 22050;
+            const int toneMs = 180;
+            const int gapMs = 65;
+            const float volume = 0.88f;
+
+            int[] tones = [1250, 720, 1250, 720, 1250, 720];
+            int toneSamples = sampleRate * toneMs / 1000;
+            int gapSamples = sampleRate * gapMs / 1000;
+            var samples = new float[tones.Length * toneSamples + (tones.Length - 1) * gapSamples];
+            int offset = 0;
+
+            foreach (int frequency in tones)
+            {
+                for (int i = 0; i < toneSamples; i++)
+                {
+                    double t = i / (double)sampleRate;
+                    double envelope = BuildToneEnvelope(i, toneSamples);
+                    double fundamental = Math.Sin(2.0 * Math.PI * frequency * t);
+                    double harmonic = Math.Sin(2.0 * Math.PI * frequency * 2.0 * t) * 0.32;
+                    samples[offset + i] = (float)((fundamental + harmonic) / 1.32 * volume * envelope);
+                }
+
+                offset += toneSamples;
+                if (offset < samples.Length)
+                    offset += gapSamples;
+            }
+
+            return BuildWav16(samples, sampleRate);
+        }
+
         private static byte[] BuildRemarkToneWav()
         {
             const int sampleRate = 22050;
@@ -1067,6 +1173,7 @@ namespace ExpressPackingMonitoring.Audio
         }
 
         private static byte[]? _warningAlertToneWav;
+        private static byte[]? _industrialAlarmWav;
         private static byte[]? _remarkToneWav;
 
         private void PlayWavBlocking(byte[] wavData)
@@ -1131,6 +1238,14 @@ namespace ExpressPackingMonitoring.Audio
 
         public void Stop()
         {
+            if (Volatile.Read(ref _criticalWarningCount) > 0)
+                return;
+
+            StopCore();
+        }
+
+        private void StopCore()
+        {
             _speechCancelRequested = true;
             lock (_filePlaybackLock)
             {
@@ -1166,11 +1281,71 @@ namespace ExpressPackingMonitoring.Audio
             });
         }
 
-        public void SpeakWarning(string text, int repeatCount = 1, bool cancelPrevious = true)
+        public void SpeakWarning(string text, int repeatCount = 1, bool cancelPrevious = true, bool playTonePerRepeat = false)
         {
             if (!EnableSoundPrompt) return;
             if (cancelPrevious) Stop();
-            EnqueueSpeechRequest(new SpeechRequest { Text = text, IsWarning = true, RepeatCount = repeatCount });
+            EnqueueSpeechRequest(new SpeechRequest
+            {
+                Text = text,
+                IsWarning = true,
+                RepeatCount = repeatCount,
+                PlayWarningTone = true,
+                PlayWarningTonePerRepeat = playTonePerRepeat
+            });
+        }
+
+        public void PlayAlert(AlertRequest request)
+        {
+            if (!EnableSoundPrompt || request == null || string.IsNullOrWhiteSpace(request.SpeechText))
+                return;
+
+            bool isCritical = request.Priority == AlertPriority.Critical;
+            if (isCritical)
+            {
+                SpeakCriticalWarning(
+                    request.SpeechText,
+                    request.SpeechRepeatCount,
+                    request.SoundRepeatCount,
+                    request.Sound == AlertSound.IndustrialAlarm);
+                return;
+            }
+
+            if (request.InterruptCurrent)
+                Stop();
+            EnqueueSpeechRequest(new SpeechRequest
+            {
+                Text = request.SpeechText,
+                IsWarning = request.VoiceStyle == AlertVoiceStyle.Warning,
+                RepeatCount = Math.Max(1, request.SpeechRepeatCount),
+                AlertToneRepeatCount = Math.Max(1, request.SoundRepeatCount),
+                UseIndustrialAlarm = request.Sound == AlertSound.IndustrialAlarm,
+                PlayWarningTone = request.Sound == AlertSound.Warning,
+                PlayRemarkTone = request.Sound == AlertSound.Remark
+            });
+        }
+
+        private void SpeakCriticalWarning(string text, int repeatCount, int soundRepeatCount, bool useIndustrialAlarm)
+        {
+            if (!EnableSoundPrompt) return;
+
+            int pendingCriticalWarnings = Interlocked.Increment(ref _criticalWarningCount);
+            if (pendingCriticalWarnings == 1)
+                StopCore();
+
+            if (!EnqueueSpeechRequest(new SpeechRequest
+            {
+                Text = text,
+                IsWarning = true,
+                IsCriticalWarning = true,
+                RepeatCount = Math.Max(1, repeatCount),
+                AlertToneRepeatCount = Math.Max(1, soundRepeatCount),
+                UseIndustrialAlarm = useIndustrialAlarm,
+                PlayWarningTonePerRepeat = false
+            }))
+            {
+                Interlocked.Decrement(ref _criticalWarningCount);
+            }
         }
 
         #region winmm.dll
@@ -1246,7 +1421,7 @@ namespace ExpressPackingMonitoring.Audio
             if (Interlocked.Exchange(ref _disposeStarted, 1) != 0) return;
             _isDisposed = true;
             _disposeCts.Cancel();
-            Stop();
+            StopCore();
             _speechProcessingGate.Set();
             _idleUnloadTimer?.Dispose();
             try { _preGenQueue?.CompleteAdding(); } catch { }

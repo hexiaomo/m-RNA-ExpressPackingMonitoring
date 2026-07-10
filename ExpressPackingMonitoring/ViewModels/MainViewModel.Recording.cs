@@ -2,6 +2,7 @@ using ExpressPackingMonitoring.Helpers;
 using ExpressPackingMonitoring.Logging;
 using ExpressPackingMonitoring.Data;
 using ExpressPackingMonitoring.Config;
+using ExpressPackingMonitoring.Audio;
 using System;
 using System.Collections.Concurrent;
 using System.Diagnostics;
@@ -152,12 +153,12 @@ namespace ExpressPackingMonitoring.ViewModels
                                 if (tooSmall)
                                 {
                                     ShowToast("警告：视频文件太小，已删除");
-                                    SpeakWarning("视频文件太小，已删除");
+                                    SpeakWarning(DefaultSpeechCatalog.VideoFileTooSmall);
                                 }
                                 else if (tooShort)
                                 {
                                     ShowToast($"警告：录像过短({recordDuration:F1}s)，已丢弃");
-                                    SpeakWarning("录像过短，已丢弃");
+                                    SpeakWarning(DefaultSpeechCatalog.RecordingTooShort);
                                 }
                             }
                         });
@@ -485,7 +486,7 @@ namespace ExpressPackingMonitoring.ViewModels
                     if (_videoSource == null || !_videoSource.IsRunning)
                     {
                         ShowToast("警告：摄像头未就绪，请检查连接");
-                        SpeakWarning("摄像头未就绪");
+                        SpeakWarning(DefaultSpeechCatalog.CameraNotReady);
                         return;
                     }
                 }
@@ -510,7 +511,7 @@ namespace ExpressPackingMonitoring.ViewModels
                     if (!IsDirectoryWritable(baseFolder))
                     {
                         ShowToast("警告：存储路径不可写，请检查磁盘");
-                        SpeakWarning("存储路径不可写");
+                        SpeakWarning(DefaultSpeechCatalog.StoragePathNotWritable);
                         return;
                     }
                 }
@@ -599,7 +600,7 @@ namespace ExpressPackingMonitoring.ViewModels
                     {
                         WriteAudioDiagnostic("麦克风录音启动失败");
                         ShowToast("音频录制启动失败");
-                        SpeakWarning("音频录制启动失败");
+                        SpeakWarning(DefaultSpeechCatalog.AudioRecordingStartFailed);
                         try
                         {
                             lock (_videoLock)
@@ -623,7 +624,7 @@ namespace ExpressPackingMonitoring.ViewModels
                 RuntimeLog.Info("Recording", $"Database record inserted id={_currentRecordId}, file={Path.GetFileName(filePath)}");
 
                 ShowToast("提示：开始录像");
-                Speak("开始录制", cancelPrevious: false);
+                Speak(DefaultSpeechCatalog.StartRecording, cancelPrevious: false);
                 _currentScanRecord = new ScanRecord(_recordingOrderId, "0s", DateTime.Now.ToString("HH:mm:ss"), _recordingMode, true);
                 AddRecord(_currentScanRecord);
             }
@@ -700,7 +701,7 @@ namespace ExpressPackingMonitoring.ViewModels
                     }
 
                     ShowToast("警告：录制启动失败");
-                    SpeakWarning("录制失败");
+                    SpeakWarning(DefaultSpeechCatalog.RecordingFailed);
                     MessageBox.Show(
                         $"当前设置的编码器无法完成录制，视频未保存。\n\n请求编码器: {EncodingHelper.GetEncoderLabel(requestedEncoder)}\n错误详情: {errorDetail}\n\n已自动尝试 CPU 软编码；若仍失败，请检查摄像头画面和存储路径。",
                         "录制失败", MessageBoxButton.OK, MessageBoxImage.Warning);

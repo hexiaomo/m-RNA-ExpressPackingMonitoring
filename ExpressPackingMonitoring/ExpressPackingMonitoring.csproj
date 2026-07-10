@@ -4,6 +4,7 @@
     <OutputType>WinExe</OutputType>
     <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <PlatformTarget>x64</PlatformTarget>
     <SelfContained>true</SelfContained>
     <UseRidGraph>true</UseRidGraph>
     <EnableMsixTooling>true</EnableMsixTooling>
@@ -90,6 +91,7 @@
   <ItemGroup>
     <Compile Include="App.xaml.cs" />
     <Compile Include="Audio\AudioProbe.cs" />
+    <Compile Include="Audio\DefaultSpeechCatalog.cs" />
     <Compile Include="Audio\SpeechService.cs" />
     <Compile Include="Config\AppConfig.cs" />
     <Compile Include="Config\AppPaths.cs" />
@@ -104,6 +106,7 @@
     <Compile Include="Logging\RuntimeLog.cs" />
     <Compile Include="Services\UpdateCheckOptions.cs" />
     <Compile Include="Services\UpdateCheckService.cs" />
+    <Compile Include="Services\AlertService.cs" />
     <Compile Include="Services\VideoClipService.cs" />
     <Compile Include="Services\WebServer.cs" />
     <Compile Include="Themes\ThemeManager.cs" />

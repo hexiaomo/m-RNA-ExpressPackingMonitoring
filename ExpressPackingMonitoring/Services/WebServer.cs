@@ -3,6 +3,7 @@ using ExpressPackingMonitoring.Logging;
 using ExpressPackingMonitoring.Data;
 using ExpressPackingMonitoring.Config;
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -29,12 +30,39 @@ namespace ExpressPackingMonitoring.Services
         public string BuyerMessage { get; set; } = "";
         public string SellerMemo { get; set; } = "";
         public string ProductInfo { get; set; } = "";
+        public bool HasRefund { get; set; }
+        public bool IsPrintedRefund { get; set; }
+        public string RefundStatus { get; set; } = "";
+        public string RefundProductInfo { get; set; } = "";
         public DateTime PushTime { get; set; } = DateTime.Now;
         public bool IsTest { get; set; }
     }
 
+    public sealed class OrderLookupResult
+    {
+        public bool Responded { get; set; }
+        public IReadOnlyList<OrderInfo> Orders { get; set; } = Array.Empty<OrderInfo>();
+    }
+
     public sealed class WebServer : IDisposable
     {
+        private sealed class PendingOrderLookup
+        {
+            public string RequestId { get; init; } = "";
+            public DateTime CreatedAtUtc { get; init; } = DateTime.UtcNow;
+            public TaskCompletionSource<OrderLookupResult> Completion { get; } =
+                new(TaskCreationOptions.RunContinuationsAsynchronously);
+            public int Claimed;
+        }
+
+        private sealed class OrderLookupResponse
+        {
+            public string RequestId { get; set; } = "";
+            public bool Success { get; set; }
+            public List<OrderInfo> Orders { get; set; }
+            public string Error { get; set; } = "";
+        }
+
         private const int MaxJsonBodyBytes = 64 * 1024;
         private const int MaxOrderInfoBodyBytes = 1024 * 1024;
         internal const int MaxOrderInfoItems = 200;
@@ -57,6 +85,10 @@ namespace ExpressPackingMonitoring.Services
         // 订单信息缓存：Key 为快递单号(大写)，保留最近72小时的数据
         private readonly Dictionary<string, OrderInfo> _orderInfoCache = new();
         private readonly object _orderInfoLock = new();
+        private readonly ConcurrentDictionary<string, PendingOrderLookup> _pendingOrderLookups = new();
+        private readonly SemaphoreSlim _orderLookupSignal = new(0);
+        private int _activeOrderLookupPolls;
+        private long _lastOrderLookupPollUtcTicks;
         private const int MaxOrderInfoEntries = 5000;
         private static readonly string _orderInfoCachePath = AppPaths.OrderInfoCachePath;
 
@@ -243,7 +275,9 @@ namespace ExpressPackingMonitoring.Services
 
                 if (method == "POST")
                 {
-                    int maxBodyBytes = path == "/api/orderinfo" ? MaxOrderInfoBodyBytes : MaxJsonBodyBytes;
+                    int maxBodyBytes = path is "/api/orderinfo" or "/api/order-lookup/result"
+                        ? MaxOrderInfoBodyBytes
+                        : MaxJsonBodyBytes;
                     if (ctx.Request.ContentLength64 > maxBodyBytes)
                     {
                         SendJson(ctx, 413, new { error = $"请求内容过大，最大允许 {maxBodyBytes / 1024} KB" });
@@ -310,6 +344,12 @@ namespace ExpressPackingMonitoring.Services
                             HandlePushOrderInfo(ctx);
                         else
                             HandleQueryOrderInfo(ctx);
+                        break;
+                    case "/api/order-lookup/pending" when method == "GET":
+                        HandlePollOrderLookup(ctx);
+                        break;
+                    case "/api/order-lookup/result" when method == "POST":
+                        HandleOrderLookupResult(ctx);
                         break;
                     default:
                         if (method == "HEAD" && path.StartsWith("/api/videos/") && path.EndsWith("/play"))
@@ -483,28 +523,9 @@ namespace ExpressPackingMonitoring.Services
 
                 ValidateOrderInfoItems(items);
 
-                int count = 0;
                 var realItems = items.Where(x => !x.IsTest).ToList();
                 var testItems = items.Where(x => x.IsTest).ToList();
-                lock (_orderInfoLock)
-                {
-                    // 超过上限时清理72小时前的旧数据
-                    if (_orderInfoCache.Count > MaxOrderInfoEntries)
-                    {
-                        var cutoff = DateTime.Now.AddHours(-72);
-                        var expiredKeys = _orderInfoCache.Where(kv => kv.Value.PushTime < cutoff).Select(kv => kv.Key).ToList();
-                        foreach (var k in expiredKeys) _orderInfoCache.Remove(k);
-                    }
-
-                    foreach (var item in realItems)
-                    {
-                        if (string.IsNullOrWhiteSpace(item.TrackingNumber)) continue;
-                        string key = item.TrackingNumber.Trim().ToUpperInvariant();
-                        item.PushTime = DateTime.Now;
-                        _orderInfoCache[key] = item;
-                        count++;
-                    }
-                }
+                int count = StoreOrderInfos(realItems, preserveConfirmedRefund: true);
 
                 if (EnableOrderInfoLog)
                 {
@@ -512,16 +533,8 @@ namespace ExpressPackingMonitoring.Services
                     foreach (var item in items)
                     {
                         if (!string.IsNullOrWhiteSpace(item.TrackingNumber))
-                            Log($"  订单: 运单号={item.TrackingNumber}, 订单号={item.OrderId}, 测试={item.IsTest}, 买家留言=[{item.BuyerMessage}], 卖家备注=[{item.SellerMemo}], 商品=[{item.ProductInfo}]");
+                            Log($"  订单: 运单号={item.TrackingNumber}, 订单号={item.OrderId}, 测试={item.IsTest}, 打印后退款={item.IsPrintedRefund}, 退款状态=[{item.RefundStatus}], 买家留言=[{item.BuyerMessage}], 卖家备注=[{item.SellerMemo}], 商品=[{item.ProductInfo}]");
                     }
-                }
-
-                if (realItems.Count > 0)
-                {
-                    // 持久化到磁盘
-                    SaveOrderInfoCache();
-                    _db.UpsertOrderInfos(realItems);
-                    _db.UpdateRecentVideoOrderInfos(realItems);
                 }
 
                 // 通知订阅方预生成语音缓存
@@ -534,6 +547,50 @@ namespace ExpressPackingMonitoring.Services
                 Log($"HandlePushOrderInfo 异常: {ex.Message}");
                 SendJson(ctx, 400, new { error = ex.Message });
             }
+        }
+
+        private int StoreOrderInfos(List<OrderInfo> items, bool preserveConfirmedRefund)
+        {
+            int count = 0;
+            if (items == null || items.Count == 0) return count;
+
+            lock (_orderInfoLock)
+            {
+                // 超过上限时清理72小时前的旧数据
+                if (_orderInfoCache.Count > MaxOrderInfoEntries)
+                {
+                    var cutoff = DateTime.Now.AddHours(-72);
+                    var expiredKeys = _orderInfoCache.Where(kv => kv.Value.PushTime < cutoff).Select(kv => kv.Key).ToList();
+                    foreach (var k in expiredKeys) _orderInfoCache.Remove(k);
+                }
+
+                foreach (var item in items)
+                {
+                    if (string.IsNullOrWhiteSpace(item.TrackingNumber)) continue;
+                    string key = item.TrackingNumber.Trim().ToUpperInvariant();
+                    if (preserveConfirmedRefund && _orderInfoCache.TryGetValue(key, out var existing) && existing.IsPrintedRefund && !item.IsPrintedRefund)
+                    {
+                        // 普通页面的旧 DOM 不覆盖已确认退款；扫码触发的实时查询可以覆盖。
+                        item.HasRefund = true;
+                        item.IsPrintedRefund = true;
+                        if (string.IsNullOrWhiteSpace(item.RefundStatus))
+                            item.RefundStatus = existing.RefundStatus;
+                        if (string.IsNullOrWhiteSpace(item.RefundProductInfo))
+                            item.RefundProductInfo = existing.RefundProductInfo;
+                    }
+                    item.PushTime = DateTime.Now;
+                    _orderInfoCache[key] = item;
+                    count++;
+                }
+            }
+
+            if (count > 0)
+            {
+                SaveOrderInfoCache();
+                _db.UpsertOrderInfos(items);
+                _db.UpdateRecentVideoOrderInfos(items);
+            }
+            return count;
         }
 
         // ───── API: 查询订单信息 ─────
@@ -557,7 +614,11 @@ namespace ExpressPackingMonitoring.Services
                         info.OrderId,
                         info.BuyerMessage,
                         info.SellerMemo,
-                        info.ProductInfo
+                        info.ProductInfo,
+                        info.HasRefund,
+                        info.IsPrintedRefund,
+                        info.RefundStatus,
+                        info.RefundProductInfo
                     });
                     return;
                 }
@@ -576,12 +637,140 @@ namespace ExpressPackingMonitoring.Services
                 if (_orderInfoCache.TryGetValue(key, out var info))
                 {
                     if (EnableOrderInfoLog)
-                        Log($"GetOrderInfo 命中: {key} => 买家留言=[{info.BuyerMessage}], 卖家备注=[{info.SellerMemo}], 商品=[{info.ProductInfo}]");
+                        Log($"GetOrderInfo 命中: {key} => 打印后退款={info.IsPrintedRefund}, 退款状态=[{info.RefundStatus}], 买家留言=[{info.BuyerMessage}], 卖家备注=[{info.SellerMemo}], 商品=[{info.ProductInfo}]");
                     return info;
                 }
                 if (EnableOrderInfoLog)
                     Log($"GetOrderInfo 未命中: {key}, 缓存总数={_orderInfoCache.Count}");
                 return null;
+            }
+        }
+
+        public bool HasActiveOrderLookupClient
+        {
+            get
+            {
+                long ticks = Volatile.Read(ref _lastOrderLookupPollUtcTicks);
+                return Volatile.Read(ref _activeOrderLookupPolls) > 0 ||
+                    (ticks > 0 && DateTime.UtcNow - new DateTime(ticks, DateTimeKind.Utc) < TimeSpan.FromSeconds(5));
+            }
+        }
+
+        public async Task<OrderLookupResult> RequestFreshOrderSnapshotAsync(TimeSpan timeout)
+        {
+            if (!HasActiveOrderLookupClient)
+                return new OrderLookupResult { Responded = false };
+
+            CleanupExpiredOrderLookups();
+            var pending = new PendingOrderLookup
+            {
+                RequestId = Guid.NewGuid().ToString("N")
+            };
+            _pendingOrderLookups[pending.RequestId] = pending;
+            _orderLookupSignal.Release();
+
+            Task completed = await Task.WhenAny(pending.Completion.Task, Task.Delay(timeout));
+            _pendingOrderLookups.TryRemove(pending.RequestId, out _);
+            return completed == pending.Completion.Task
+                ? await pending.Completion.Task
+                : new OrderLookupResult { Responded = false };
+        }
+
+        private void HandlePollOrderLookup(HttpListenerContext ctx)
+        {
+            Interlocked.Increment(ref _activeOrderLookupPolls);
+            Interlocked.Exchange(ref _lastOrderLookupPollUtcTicks, DateTime.UtcNow.Ticks);
+            try
+            {
+                CleanupExpiredOrderLookups();
+                PendingOrderLookup pending = ClaimNextOrderLookup();
+                if (pending == null)
+                {
+                    try { _orderLookupSignal.Wait(TimeSpan.FromSeconds(20), _cts.Token); }
+                    catch (OperationCanceledException) { }
+                    CleanupExpiredOrderLookups();
+                    pending = ClaimNextOrderLookup();
+                }
+
+                if (pending == null)
+                {
+                    SendJson(ctx, 200, new { pending = false });
+                    return;
+                }
+
+                SendJson(ctx, 200, new
+                {
+                    pending = true,
+                    requestId = pending.RequestId
+                });
+            }
+            finally
+            {
+                Interlocked.Decrement(ref _activeOrderLookupPolls);
+                Interlocked.Exchange(ref _lastOrderLookupPollUtcTicks, DateTime.UtcNow.Ticks);
+            }
+        }
+
+        private PendingOrderLookup ClaimNextOrderLookup()
+        {
+            return _pendingOrderLookups.Values
+                .OrderBy(x => x.CreatedAtUtc)
+                .FirstOrDefault(x => Interlocked.CompareExchange(ref x.Claimed, 1, 0) == 0);
+        }
+
+        private void HandleOrderLookupResult(HttpListenerContext ctx)
+        {
+            try
+            {
+                string body = ReadRequestBody(ctx, MaxOrderInfoBodyBytes);
+                var response = JsonSerializer.Deserialize<OrderLookupResponse>(body, _jsonOptions)
+                    ?? throw new InvalidDataException("请求内容无效");
+                if (string.IsNullOrWhiteSpace(response.RequestId) ||
+                    !_pendingOrderLookups.TryGetValue(response.RequestId, out var pending))
+                {
+                    SendJson(ctx, 404, new { error = "核验请求已过期" });
+                    return;
+                }
+
+                if (!response.Success)
+                {
+                    pending.Completion.TrySetResult(new OrderLookupResult { Responded = false });
+                    SendJson(ctx, 200, new { ok = true, responded = false, error = response.Error ?? "打印端查询失败" });
+                    return;
+                }
+
+                if (response.Orders == null)
+                    throw new InvalidDataException("订单快照不能为空");
+
+                foreach (OrderInfo info in response.Orders)
+                    info.TrackingNumber = info.TrackingNumber?.Trim().ToUpperInvariant() ?? "";
+
+                ValidateOrderInfoItems(response.Orders);
+                StoreOrderInfos(response.Orders, preserveConfirmedRefund: false);
+                try { OrderInfoReceived?.Invoke(response.Orders); } catch { }
+
+                pending.Completion.TrySetResult(new OrderLookupResult
+                {
+                    Responded = true,
+                    Orders = response.Orders
+                });
+                SendJson(ctx, 200, new { ok = true, responded = true, count = response.Orders.Count, error = response.Error ?? "" });
+            }
+            catch (Exception ex)
+            {
+                Log($"HandleOrderLookupResult 异常: {ex.Message}");
+                SendJson(ctx, 400, new { error = ex.Message });
+            }
+        }
+
+        private void CleanupExpiredOrderLookups()
+        {
+            DateTime cutoff = DateTime.UtcNow.AddSeconds(-30);
+            foreach (var entry in _pendingOrderLookups)
+            {
+                if (entry.Value.CreatedAtUtc >= cutoff) continue;
+                if (_pendingOrderLookups.TryRemove(entry.Key, out var expired))
+                    expired.Completion.TrySetResult(new OrderLookupResult { Responded = false });
             }
         }
 
@@ -1477,6 +1666,8 @@ namespace ExpressPackingMonitoring.Services
                 ValidateFieldLength(item.BuyerMessage, 2000, "买家留言");
                 ValidateFieldLength(item.SellerMemo, 2000, "卖家备注");
                 ValidateFieldLength(item.ProductInfo, 4000, "商品信息");
+                ValidateFieldLength(item.RefundStatus, 256, "退款状态");
+                ValidateFieldLength(item.RefundProductInfo, 4000, "退款商品信息");
             }
         }
 
@@ -1634,6 +1825,9 @@ namespace ExpressPackingMonitoring.Services
             if (_disposed) return;
             _disposed = true;
             _cts.Cancel();
+            foreach (var pending in _pendingOrderLookups.Values)
+                pending.Completion.TrySetResult(new OrderLookupResult { Responded = false });
+            _pendingOrderLookups.Clear();
             try { _clipService.Dispose(); } catch { }
             try { _listener.Stop(); } catch { }
             try { _listener.Close(); } catch { }

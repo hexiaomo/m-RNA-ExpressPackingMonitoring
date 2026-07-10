@@ -138,6 +138,22 @@ namespace ExpressPackingMonitoring.ViewModels
         private const double MinRestartIntervalSeconds = 3.0;
 
         private readonly SemaphoreSlim _recorderLock = new SemaphoreSlim(1, 1);
+        private sealed class PrintedRefundScanCheck
+        {
+            public Guid AlertId { get; } = Guid.NewGuid();
+            public string TrackingNumber { get; init; } = "";
+            public string Mode { get; init; } = "";
+            private int _alerted;
+
+            public bool TryMarkAlerted() => Interlocked.Exchange(ref _alerted, 1) == 0;
+        }
+
+        private static readonly TimeSpan PrintedRefundLookupInterval = TimeSpan.FromSeconds(5);
+        private static readonly TimeSpan PrintedRefundLookupTimeout = TimeSpan.FromSeconds(8);
+        private readonly object _printedRefundLookupLock = new();
+        private readonly List<PrintedRefundScanCheck> _pendingPrintedRefundChecks = new();
+        private Task _printedRefundLookupTask;
+        private DateTime _lastPrintedRefundLookupUtc = DateTime.MinValue;
         private readonly SemaphoreSlim _mkvConvertLock = new SemaphoreSlim(1, 1);
         private readonly SemaphoreSlim _shutdownLock = new SemaphoreSlim(1, 1);
         private volatile bool _shutdownRequested;
@@ -160,6 +176,7 @@ namespace ExpressPackingMonitoring.ViewModels
         // ====================================
 
         private SpeechService _speechService;
+        private AlertService _alertService;
 
         private string _currentMode = "发货";
         private string _currentOrderId = "";
@@ -469,6 +486,13 @@ namespace ExpressPackingMonitoring.ViewModels
             _speechService.UpdateBreakWords(Config.TtsBreakWords);
             if (Config.EnableAiTts)
                 _speechService.InitAiTts();
+            _alertService = new AlertService(
+                PresentAlert,
+                _speechService.PlayAlert,
+                interruptAudio: _speechService.Stop,
+                preGenerate: (text, style) => _speechService.PreGenerateCache(text, style == AlertVoiceStyle.Warning),
+                pauseAudio: _speechService.PauseForRecording,
+                resumeAudio: _speechService.ResumeAfterRecording);
             ScanCommand = new RelayCommand<string>(HandleScan);
             OpenSettingsCommand = new RelayCommand(OpenSettings);
             OpenPlaybackCommand = new RelayCommand(OpenPlaybackWindow);
@@ -561,13 +585,13 @@ namespace ExpressPackingMonitoring.ViewModels
             catch { }
         }
 
-        private void ToggleMode() { CurrentMode = CurrentMode == "发货" ? "退货" : "发货"; ShowToast($"已切换为: {CurrentMode}"); Speak(CurrentMode == "发货" ? "切换发货" : "切换退货"); }
+        private void ToggleMode() { CurrentMode = CurrentMode == "发货" ? "退货" : "发货"; ShowToast($"已切换为: {CurrentMode}"); Speak(CurrentMode == "发货" ? DefaultSpeechCatalog.SwitchToShipping : DefaultSpeechCatalog.SwitchToReturn); }
 
-        private void PauseSpeechForRecording() => _speechService?.PauseForRecording();
+        private void PauseSpeechForRecording() => _alertService?.PauseAudio();
 
         private void ResumeSpeechWhenCameraIdle()
         {
-            if (_speechService == null || _isDisposed) return;
+            if (_alertService == null || _isDisposed) return;
 
             _ = Task.Run(async () =>
             {
@@ -575,7 +599,7 @@ namespace ExpressPackingMonitoring.ViewModels
                 {
                     await Task.Delay(800);
                     if (_isDisposed || IsRecording || IsBusy) return;
-                    _speechService.ResumeAfterRecording();
+                    _alertService.ResumeAudio();
                 }
                 catch { }
             });
@@ -598,7 +622,7 @@ namespace ExpressPackingMonitoring.ViewModels
                     CurrentOrderId = "";
                     ScanInputText = "";
                     ShowToast("已手动停止录制");
-                    Speak("停止录制", cancelPrevious: false);
+                    Speak(DefaultSpeechCatalog.StopRecording, cancelPrevious: false);
                     return;
                 }
                 else 
@@ -634,7 +658,11 @@ namespace ExpressPackingMonitoring.ViewModels
                     // 没有输入单号时语音提示（不打断"开始录制"，排队等播完后再警告）
                     if (CurrentOrderId.StartsWith("MAN_"))
                     {
-                        SpeakWarning("没有单号", 3, cancelPrevious: false);
+                        PublishScannerAlert(
+                            "missing-order-number",
+                            "警告：没有单号",
+                            DefaultSpeechCatalog.MissingOrderNumber,
+                            repeatCount: 3);
                     }
 
                     // 语音播报完成后再暂停，避免"开始录制"被延迟
@@ -677,8 +705,8 @@ namespace ExpressPackingMonitoring.ViewModels
 
             // 指令处理
             if (upperResult.Contains("CLEAR") || upperResult.Contains("清除")) { ShowToast("提示：扫码框已清除"); return; }
-            if (upperResult.Contains("SHIP") || upperResult.Contains("发货") || upperResult.Contains("FAHUO")) { CurrentMode = "发货"; StartInputCooldown(); ShowToast("切换为发货模式"); Speak("切换发货"); return; }
-            if (upperResult.Contains("BACK") || upperResult.Contains("退货") || upperResult.Contains("TUIHUO")) { CurrentMode = "退货"; StartInputCooldown(); ShowToast("切换为退货模式"); Speak("切换退货"); return; }
+            if (upperResult.Contains("SHIP") || upperResult.Contains("发货") || upperResult.Contains("FAHUO")) { CurrentMode = "发货"; StartInputCooldown(); ShowToast("切换为发货模式"); Speak(DefaultSpeechCatalog.SwitchToShipping); return; }
+            if (upperResult.Contains("BACK") || upperResult.Contains("退货") || upperResult.Contains("TUIHUO")) { CurrentMode = "退货"; StartInputCooldown(); ShowToast("切换为退货模式"); Speak(DefaultSpeechCatalog.SwitchToReturn); return; }
             if (upperResult.Contains("START") || upperResult.Contains("开始录制")) { ToggleRecording(); return; }
             if (upperResult.Contains("STOP") || upperResult.Contains("停止录制")) { _ = SafeStopRecordingAsync(true, mergeAfterStop: true); return; }
 
@@ -690,14 +718,14 @@ namespace ExpressPackingMonitoring.ViewModels
                 if (string.IsNullOrWhiteSpace(recordingOrderId))
                 {
                     ShowToast("当前录像未绑定单号，无法同码停录");
-                    SpeakWarning("当前录像未绑定单号");
+                    SpeakWarning(DefaultSpeechCatalog.RecordingHasNoOrderNumber);
                     return;
                 }
 
                 if (upperResult != recordingOrderId)
                 {
                     ShowToast($"警告：单号不一致：{upperResult}");
-                    SpeakWarning("单号不一致");
+                    SpeakWarning(DefaultSpeechCatalog.OrderNumberMismatch);
                     return;
                 }
 
@@ -716,7 +744,7 @@ namespace ExpressPackingMonitoring.ViewModels
                     CurrentOrderId = "";
                     ScanInputText = "";
                     ShowToast("单号匹配，已停止录制");
-                    Speak("停止录制", cancelPrevious: false);
+                    Speak(DefaultSpeechCatalog.StopRecording, cancelPrevious: false);
                 }
                 catch (Exception ex)
                 {
@@ -733,7 +761,18 @@ namespace ExpressPackingMonitoring.ViewModels
             }
 
             // 正则验证
-            try { if (!System.Text.RegularExpressions.Regex.IsMatch(upperResult, Config.OrderIdRegex)) { ShowToast("非法单号，已拦截"); SpeakWarning("非法单号"); return; } } catch { }
+            try
+            {
+                if (!System.Text.RegularExpressions.Regex.IsMatch(upperResult, Config.OrderIdRegex))
+                {
+                    PublishScannerAlert(
+                        $"invalid-order-number:{upperResult}",
+                        "非法单号，已拦截",
+                        DefaultSpeechCatalog.InvalidOrderNumber);
+                    return;
+                }
+            }
+            catch { }
 
             Debug.WriteLine($"[Zoom] 扫码事件触发: ID={upperResult}, ZoomEnabled={Config.EnableSmartZoom}, Delay={Config.ZoomDelaySeconds}");
             StartInputCooldown();
@@ -744,7 +783,7 @@ namespace ExpressPackingMonitoring.ViewModels
             try
             {
                 // 扫码切换：立即打断上一轮可能还在播放的语音（如"重复单号"×3）
-                _speechService?.Stop();
+                _alertService?.InterruptAudio();
                 if (IsRecording)
                 {
                     PauseSpeechForRecording();
@@ -752,13 +791,17 @@ namespace ExpressPackingMonitoring.ViewModels
                     await InternalStopRecordingAsync();
                 }
                 await InternalStartRecordingAsync();
+                QueuePrintedRefundCheck(upperResult, CurrentMode);
 
                 // 录制已启动、数据库记录已写入，此时检查重复单号（排除刚刚插入的当前记录）
                 bool isDuplicate = _db != null && _db.OrderIdExistsRecent(upperResult, excludeRecordId: _currentRecordId);
                 if (isDuplicate)
                 {
-                    ShowToast("警告：重复单号，请确认");
-                    SpeakWarning("重复单号", 3, cancelPrevious: false);
+                    PublishScannerAlert(
+                        $"duplicate-order-number:{upperResult}",
+                        "警告：重复单号，请确认",
+                        DefaultSpeechCatalog.DuplicateOrderNumber,
+                        repeatCount: 3);
                 }
 
                 // 查询快递助手推送的订单信息，播报留言/备注/商品
@@ -773,15 +816,15 @@ namespace ExpressPackingMonitoring.ViewModels
                     {
                         if (Config.AnnounceBuyerMessage && !string.IsNullOrWhiteSpace(orderInfo.BuyerMessage))
                         {
-                            SpeakWithRemarkTone($"买家留言，{orderInfo.BuyerMessage}", cancelPrevious: false);
+                            SpeakWithRemarkTone(DefaultSpeechCatalog.CreateBuyerMessageAnnouncement(orderInfo.BuyerMessage), cancelPrevious: false);
                         }
                         if (Config.AnnounceSellerMemo && !string.IsNullOrWhiteSpace(orderInfo.SellerMemo))
                         {
-                            SpeakWithRemarkTone($"卖家备注，{orderInfo.SellerMemo}", cancelPrevious: false);
+                            SpeakWithRemarkTone(DefaultSpeechCatalog.CreateSellerMemoAnnouncement(orderInfo.SellerMemo), cancelPrevious: false);
                         }
                         if (Config.AnnounceProductInfo && !string.IsNullOrWhiteSpace(orderInfo.ProductInfo))
                         {
-                            Speak($"商品，{orderInfo.ProductInfo}", cancelPrevious: false);
+                            Speak(DefaultSpeechCatalog.CreateProductAnnouncement(orderInfo.ProductInfo), cancelPrevious: false);
                         }
                     }
                 }
@@ -842,6 +885,154 @@ namespace ExpressPackingMonitoring.ViewModels
             if (upperResult.Contains("STOP") || upperResult.Contains("停止录制")) return false;
             try { return System.Text.RegularExpressions.Regex.IsMatch(upperResult, Config.OrderIdRegex); }
             catch { return false; }
+        }
+
+        internal static bool ShouldAlertPrintedRefund(string mode, bool alertEnabled, OrderInfo orderInfo)
+        {
+            if (!alertEnabled ||
+                (mode != "发货" && mode != "退货") ||
+                orderInfo?.IsPrintedRefund != true)
+                return false;
+
+            string[] statuses = ParseRefundStatuses(orderInfo.RefundStatus);
+            return statuses.Length == 0 || statuses.Any(status => status != "NO_REFUND");
+        }
+
+        internal static string GetRefundStatusDisplayText(OrderInfo orderInfo)
+        {
+            string[] statuses = ParseRefundStatuses(orderInfo?.RefundStatus);
+            if (statuses.Length == 0)
+                return "存在打印后退款，请人工核对";
+
+            var descriptions = statuses
+                .Where(status => status != "NO_REFUND")
+                .Select(status => status switch
+                {
+                    "WAIT_SELLER_AGREE" => DefaultSpeechCatalog.RefundWaitingSeller,
+                    "WAIT_BUYER_RETURN_GOODS" => DefaultSpeechCatalog.RefundWaitingBuyerReturn,
+                    "WAIT_SELLER_CONFIRM_GOODS" => DefaultSpeechCatalog.RefundWaitingSellerConfirm,
+                    "SUCCESS" => DefaultSpeechCatalog.RefundCompleted,
+                    "CLOSED" => DefaultSpeechCatalog.RefundClosed,
+                    _ => $"退款状态未知（{status}），请人工核对"
+                })
+                .Distinct()
+                .ToList();
+
+            return descriptions.Count == 0 ? "无退款" : string.Join("，", descriptions);
+        }
+
+        private static string[] ParseRefundStatuses(string refundStatus)
+        {
+            return (refundStatus ?? "")
+                .Split(new[] { ',', '，', ';', '；', '|' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Select(status => status.ToUpperInvariant())
+                .Distinct()
+                .ToArray();
+        }
+
+        internal static TimeSpan GetPrintedRefundLookupDelay(DateTime lastRequestUtc, DateTime nowUtc)
+        {
+            if (lastRequestUtc == DateTime.MinValue)
+                return TimeSpan.Zero;
+
+            TimeSpan remaining = PrintedRefundLookupInterval - (nowUtc - lastRequestUtc);
+            return remaining > TimeSpan.Zero ? remaining : TimeSpan.Zero;
+        }
+
+        private void QueuePrintedRefundCheck(string trackingNumber, string mode)
+        {
+            if (!Config.EnablePrintedRefundAlert || string.IsNullOrWhiteSpace(trackingNumber))
+                return;
+
+            var check = new PrintedRefundScanCheck
+            {
+                TrackingNumber = trackingNumber.Trim().ToUpperInvariant(),
+                Mode = mode
+            };
+
+            CheckPrintedRefundAndAlert(check, _webServer?.GetOrderInfo(check.TrackingNumber), "最近缓存");
+
+            lock (_printedRefundLookupLock)
+            {
+                _pendingPrintedRefundChecks.Add(check);
+                if (_printedRefundLookupTask == null || _printedRefundLookupTask.IsCompleted)
+                    _printedRefundLookupTask = Task.Run(RunPrintedRefundLookupLoopAsync);
+            }
+        }
+
+        private async Task RunPrintedRefundLookupLoopAsync()
+        {
+            while (true)
+            {
+                TimeSpan delay;
+                lock (_printedRefundLookupLock)
+                {
+                    if (_isDisposed || _pendingPrintedRefundChecks.Count == 0)
+                    {
+                        _printedRefundLookupTask = null;
+                        return;
+                    }
+                    delay = GetPrintedRefundLookupDelay(_lastPrintedRefundLookupUtc, DateTime.UtcNow);
+                }
+
+                if (delay > TimeSpan.Zero)
+                    await Task.Delay(delay);
+
+                WebServer server = _webServer;
+                OrderLookupResult result = new() { Responded = false };
+                lock (_printedRefundLookupLock)
+                    _lastPrintedRefundLookupUtc = DateTime.UtcNow;
+
+                try
+                {
+                    if (server != null)
+                        result = await server.RequestFreshOrderSnapshotAsync(PrintedRefundLookupTimeout);
+                }
+                catch (Exception ex)
+                {
+                    RuntimeLog.Error("Scan", "Printed-refund snapshot request failed", ex);
+                }
+
+                List<PrintedRefundScanCheck> checks;
+                lock (_printedRefundLookupLock)
+                {
+                    checks = _pendingPrintedRefundChecks.ToList();
+                    _pendingPrintedRefundChecks.Clear();
+                }
+
+                foreach (PrintedRefundScanCheck check in checks)
+                    CheckPrintedRefundAndAlert(check, server?.GetOrderInfo(check.TrackingNumber), result.Responded ? "最新页面快照" : "请求失败后的最近缓存");
+
+                RuntimeLog.Info(
+                    "Scan",
+                    $"Printed-refund snapshot checked: responded={result.Responded}, returned={result.Orders.Count}, scans={checks.Count}");
+            }
+        }
+
+        private void CheckPrintedRefundAndAlert(PrintedRefundScanCheck check, OrderInfo orderInfo, string source)
+        {
+            if (!ShouldAlertPrintedRefund(check.Mode, Config.EnablePrintedRefundAlert, orderInfo) || !check.TryMarkAlerted())
+                return;
+
+            RuntimeLog.Warn(
+                "Scan",
+                $"Printed-refund order detected: tracking={check.TrackingNumber}, order={orderInfo.OrderId}, status={orderInfo.RefundStatus}, source={source}");
+            string statusText = GetRefundStatusDisplayText(orderInfo);
+            if (_isDisposed)
+                return;
+
+            _alertService?.Publish(new AlertRequest
+            {
+                Message = $"警告：快递单 {check.TrackingNumber}，{statusText}",
+                SpeechText = DefaultSpeechCatalog.CreatePrintedRefundAnnouncement(statusText),
+                Priority = AlertPriority.Critical,
+                Sound = AlertSound.IndustrialAlarm,
+                SoundRepeatCount = 1,
+                SpeechRepeatCount = 3,
+                DisplayDuration = TimeSpan.FromSeconds(12),
+                DeduplicationKey = $"printed-refund:{check.TrackingNumber}:{check.AlertId}",
+                DeduplicationWindow = TimeSpan.FromMinutes(1)
+            });
         }
 
         public bool IsAutoSubmitScanCandidate(string scanText)
@@ -907,7 +1098,7 @@ namespace ExpressPackingMonitoring.ViewModels
                     CurrentOrderId = "";
                     ScanInputText = "";
                     ShowToast("已手动停止录制");
-                    Speak("停止录制", cancelPrevious: false);
+                    Speak(DefaultSpeechCatalog.StopRecording, cancelPrevious: false);
                 }
             }
             finally
@@ -921,7 +1112,59 @@ namespace ExpressPackingMonitoring.ViewModels
 
         // 录制、编码、磁盘清理逻辑已移动到 MainViewModel.Recording.cs / MainViewModel.Encoder.cs / MainViewModel.Cleanup.cs
 
-        public void ShowToast(string message) { Application.Current.Dispatcher.InvokeAsync(async () => { _toastCts?.Cancel(); _toastCts = new CancellationTokenSource(); var token = _toastCts.Token; ToastMessage = message; IsToastVisible = true; try { await Task.Delay(2500, token); } catch (OperationCanceledException) { return; } IsToastVisible = false; }); }
+        public void ShowToast(string message)
+        {
+            if (_alertService != null)
+            {
+                _alertService.Publish(new AlertRequest
+                {
+                    Message = message,
+                    Priority = AlertPriority.Normal,
+                    Sound = AlertSound.None,
+                    DisplayDuration = TimeSpan.FromMilliseconds(2500)
+                });
+                return;
+            }
+
+            PresentToast(message, TimeSpan.FromMilliseconds(2500));
+        }
+
+        private void PresentAlert(AlertRequest request) => PresentToast(request.Message, request.DisplayDuration);
+
+        private void PresentToast(string message, TimeSpan displayDuration)
+        {
+            Application.Current?.Dispatcher?.InvokeAsync(async () =>
+            {
+                _toastCts?.Cancel();
+                _toastCts = new CancellationTokenSource();
+                var token = _toastCts.Token;
+                ToastMessage = message;
+                IsToastVisible = true;
+                try { await Task.Delay(displayDuration, token); }
+                catch (OperationCanceledException) { return; }
+                IsToastVisible = false;
+            });
+        }
+
+        private void PublishScannerAlert(
+            string deduplicationKey,
+            string message,
+            string speechText,
+            int repeatCount = 1)
+        {
+            _alertService?.Publish(new AlertRequest
+            {
+                Message = message,
+                SpeechText = speechText,
+                Priority = AlertPriority.Normal,
+                Sound = AlertSound.Warning,
+                SoundRepeatCount = 1,
+                SpeechRepeatCount = repeatCount,
+                DisplayDuration = TimeSpan.FromMilliseconds(2500),
+                DeduplicationKey = deduplicationKey,
+                DeduplicationWindow = TimeSpan.FromSeconds(3)
+            });
+        }
 
         private void FilterLogs() { FilteredLogs.Clear(); var keyword = LogSearchText?.ToUpper() ?? ""; foreach (var log in _allLogs) { if (string.IsNullOrEmpty(keyword) || log.OrderId.ToUpper().Contains(keyword)) FilteredLogs.Add(log); } }
         private void AddRecord(ScanRecord record) { Application.Current.Dispatcher.InvokeAsync(() => { _allLogs.Insert(0, record); if (string.IsNullOrEmpty(LogSearchText)) FilteredLogs.Insert(0, record); if (_allLogs.Count > 200) _allLogs.RemoveAt(_allLogs.Count - 1); }); }
@@ -1687,44 +1930,63 @@ namespace ExpressPackingMonitoring.ViewModels
         /// <summary>收到油猴脚本推送的订单信息时，提前生成 TTS 缓存</summary>
         private void OnOrderInfoReceived(List<OrderInfo> orders)
         {
-            if (orders == null || orders.Count == 0) return;
-
-            if (_webServer != null)
-            {
-                if (string.IsNullOrWhiteSpace(MonitorAccessAddress))
-                    _ = RefreshWorkstationStatusAsync();
-                else
-                    WorkstationAccessText = Config.RequireWebAccessKey
-                        ? $"其他电脑查视频：{MonitorAccessAddress}（访问保护已开启）"
-                        : $"其他电脑查视频：{MonitorAccessAddress}";
-                WorkstationPrintStatusText = orders.Any(x => x.IsTest)
-                    ? $"快递单打印工位：{DateTime.Now:HH:mm} 收到测试订单"
-                    : $"快递单打印工位：{DateTime.Now:HH:mm} 收到订单";
-            }
+            if (orders == null) return;
 
             bool hasTestOrder = orders.Any(x => x.IsTest);
-            if (hasTestOrder)
+            string printStatusText = hasTestOrder
+                ? $"快递单打印工位：{DateTime.Now:HH:mm} 收到测试订单"
+                : orders.Count == 0
+                    ? $"快递单打印工位：{DateTime.Now:HH:mm} 已响应，未查到退款订单"
+                    : $"快递单打印工位：{DateTime.Now:HH:mm} 收到 {orders.Count} 条订单";
+            Application application = Application.Current;
+            if (application != null)
             {
-                Application.Current.Dispatcher.InvokeAsync(() =>
+                _ = application.Dispatcher.InvokeAsync(() =>
                 {
-                    ShowToast("已收到测试订单");
+                    if (_isDisposed) return;
+                    if (_webServer != null)
+                    {
+                        if (!string.IsNullOrWhiteSpace(MonitorAccessAddress))
+                            WorkstationAccessText = Config.RequireWebAccessKey
+                                ? $"其他电脑查视频：{MonitorAccessAddress}（访问保护已开启）"
+                                : $"其他电脑查视频：{MonitorAccessAddress}";
+                        WorkstationPrintStatusText = printStatusText;
+                    }
+
+                    if (hasTestOrder)
+                    {
+                        ShowToast("已收到测试订单");
+                        SpeakWithRemarkTone(DefaultSpeechCatalog.TestOrderReceived, cancelPrevious: false);
+                    }
                 });
-                SpeakWithRemarkTone("收到测试订单", cancelPrevious: false);
             }
+
+            if (orders.Count == 0) return;
 
             var realOrders = orders.Where(x => !x.IsTest).ToList();
             if (realOrders.Count == 0)
                 return;
 
-            if (_speechService == null || !Config.EnableOrderInfoAnnounce) return;
+            if (_alertService == null) return;
+            if (Config.EnablePrintedRefundAlert)
+            {
+                foreach (string statusText in realOrders
+                    .Where(info => info.IsPrintedRefund)
+                    .Select(GetRefundStatusDisplayText)
+                    .Distinct())
+                {
+                    _alertService.PreGenerate(DefaultSpeechCatalog.CreatePrintedRefundAnnouncement(statusText), AlertVoiceStyle.Warning);
+                }
+            }
+            if (!Config.EnableOrderInfoAnnounce) return;
             foreach (var info in realOrders)
             {
                 if (Config.AnnounceBuyerMessage && !string.IsNullOrWhiteSpace(info.BuyerMessage))
-                    _speechService.PreGenerateCache($"买家留言，{info.BuyerMessage}");
+                    _alertService.PreGenerate(DefaultSpeechCatalog.CreateBuyerMessageAnnouncement(info.BuyerMessage));
                 if (Config.AnnounceSellerMemo && !string.IsNullOrWhiteSpace(info.SellerMemo))
-                    _speechService.PreGenerateCache($"卖家备注，{info.SellerMemo}");
+                    _alertService.PreGenerate(DefaultSpeechCatalog.CreateSellerMemoAnnouncement(info.SellerMemo));
                 if (Config.AnnounceProductInfo && !string.IsNullOrWhiteSpace(info.ProductInfo))
-                    _speechService.PreGenerateCache($"商品，{info.ProductInfo}");
+                    _alertService.PreGenerate(DefaultSpeechCatalog.CreateProductAnnouncement(info.ProductInfo));
             }
         }
 
@@ -1795,7 +2057,7 @@ namespace ExpressPackingMonitoring.ViewModels
                         _consecutiveRestartFailures = 0;
                         RuntimeLog.Info("Camera", "Camera reconnected after stopping interrupted recording");
                         ShowToast("摄像头已重连，当前录像已保存，请重新扫码继续");
-                        Speak("摄像头已连接");
+                        Speak(DefaultSpeechCatalog.CameraConnected);
                     }
                     else
                     {
@@ -1804,12 +2066,12 @@ namespace ExpressPackingMonitoring.ViewModels
                         {
                             RuntimeLog.Warn("Camera", $"Camera reconnect failed {_consecutiveRestartFailures} times after interrupted recording");
                             ShowToast($"警告：摄像头连续 {MaxConsecutiveRestartFailures} 次重连失败，录制已停止。请重新插拔后在设置中手动重启。");
-                            SpeakWarning("请重新连接摄像头", 3);
+                            SpeakWarning(DefaultSpeechCatalog.ReconnectCamera, 3);
                             Debug.WriteLine($"[Camera] 录制中连续 {_consecutiveRestartFailures} 次重连失败，停止录制和自动重连");
                         }
                         else
                         {
-                            SpeakWarning("摄像头断开，正在尝试连接");
+                            SpeakWarning(DefaultSpeechCatalog.CameraDisconnected);
                         }
                     }
                 }
@@ -1836,7 +2098,7 @@ namespace ExpressPackingMonitoring.ViewModels
                         if (_consecutiveRestartFailures >= MaxConsecutiveRestartFailures)
                         {
                             ShowToast($"警告：摄像头连续 {MaxConsecutiveRestartFailures} 次重连失败，已停止自动重连。请重新插拔后在设置中手动重启。");
-                            SpeakWarning("请重新连接摄像头", 3);
+                            SpeakWarning(DefaultSpeechCatalog.ReconnectCamera, 3);
                             Debug.WriteLine($"[Camera] 连续 {_consecutiveRestartFailures} 次重连失败，停止自动重连");
                         }
                     }
@@ -1870,7 +2132,7 @@ namespace ExpressPackingMonitoring.ViewModels
                 _consecutiveRestartFailures = 0;
                 StartCamera();
                 ShowToast("摄像头已唤醒");
-                Speak("摄像头已唤醒");
+                Speak(DefaultSpeechCatalog.CameraAwake);
                 Debug.WriteLine("[Idle] 用户活跃，摄像头唤醒");
             }
             else if (_consecutiveRestartFailures >= MaxConsecutiveRestartFailures)
@@ -1905,7 +2167,7 @@ namespace ExpressPackingMonitoring.ViewModels
                         IsCameraSleeping = true; // SetProperty 会同时更新字段并触发 PropertyChanged
                         VideoFrame = null;
                         ShowToast($"提示：摄像头已休眠（空闲{Config.CameraIdleMinutes}分钟）");
-                        Speak("摄像头已休眠");
+                        Speak(DefaultSpeechCatalog.CameraSleeping);
                         Debug.WriteLine($"[Idle] 摄像头休眠: 空闲{idleMinutes:F1}分钟");
                         RuntimeLog.Info("MkvRecover", "Camera idle, start pending MKV conversion");
                         _mkvRecoveryTask = Task.Run(RecoverOrphanedMkvAsync);
@@ -1937,7 +2199,7 @@ namespace ExpressPackingMonitoring.ViewModels
                 { 
                     RuntimeLog.Warn("Camera", "StartCamera found no video devices");
                     ShowToast("警告：未检测到任何摄像头");
-                    SpeakWarning("未检测到摄像头");
+                    SpeakWarning(DefaultSpeechCatalog.CameraNotDetected);
                     return; 
                 }
                 
@@ -2341,7 +2603,7 @@ namespace ExpressPackingMonitoring.ViewModels
                                 Debug.WriteLine($"[Camera] 信号丢失 {noFrameSeconds:F1}s，尝试重连 (失败次数={_consecutiveRestartFailures})");
                                 _ = Application.Current.Dispatcher.InvokeAsync(() => {
                                     ShowToast("警告：摄像头信号丢失，尝试重连...");
-                                    SpeakWarning("摄像头重新连接中");
+                                    SpeakWarning(DefaultSpeechCatalog.CameraReconnecting);
                                     RestartCameraWithRecordingStop();
                                 });
                             }
@@ -2355,7 +2617,7 @@ namespace ExpressPackingMonitoring.ViewModels
                                 Debug.WriteLine($"[Camera] 摄像头断开，尝试重连 (失败次数={_consecutiveRestartFailures})");
                                 _ = Application.Current.Dispatcher.InvokeAsync(() => {
                                     ShowToast("警告：摄像头已断开，等待重新连接...");
-                                    SpeakWarning("摄像头重新连接中");
+                                    SpeakWarning(DefaultSpeechCatalog.CameraReconnecting);
                                     RestartCameraWithRecordingStop();
                                 });
                             }
@@ -2386,7 +2648,7 @@ namespace ExpressPackingMonitoring.ViewModels
                             if (_autoStopWarned && motionIdleSec < warnSec)
                             {
                                 _autoStopWarned = false;
-                                Speak("检测到画面运动，重置超时");
+                                Speak(DefaultSpeechCatalog.MotionDetected);
                             }
 
                             // 即将超时语音提示（确保预警阈值合理：超时总时长 + 5s）
@@ -2395,14 +2657,14 @@ namespace ExpressPackingMonitoring.ViewModels
                                 && motionIdleSec >= autoStopTotalSec - warnSec)
                             {
                                 _autoStopWarned = true;
-                                SpeakWarning("画面即将静止超时");
+                                SpeakWarning(DefaultSpeechCatalog.MotionTimeoutWarning);
                             }
                             if (!_maxDurationWarned && Config.EnableMaxDuration
                                 && maxDurTotalSec > warnSec * 2
                                 && elapsedSec >= maxDurTotalSec - warnSec)
                             {
                                 _maxDurationWarned = true;
-                                SpeakWarning("录制即将达到最大时长");
+                                SpeakWarning(DefaultSpeechCatalog.RecordingDurationWarning);
                             }
                         }
 
@@ -2425,7 +2687,7 @@ namespace ExpressPackingMonitoring.ViewModels
                                 if (_isDisposed) return;
                                 await SafeStopRecordingAsync(); 
                                 ShowToast("画面静止超时，自动停录"); 
-                                SpeakWarning("静止超时，停止录制"); 
+                                SpeakWarning(DefaultSpeechCatalog.MotionTimeoutStopped);
                                 CurrentOrderId = ""; 
                                 ScanInputText = ""; 
                             }); 
@@ -2438,7 +2700,7 @@ namespace ExpressPackingMonitoring.ViewModels
                                 if (_isDisposed) return;
                                 await SafeStopRecordingAsync(); 
                                 ShowToast("提示：已达最大录像限制时长");
-                                SpeakWarning("时长超时，停止录制"); 
+                                SpeakWarning(DefaultSpeechCatalog.RecordingDurationStopped);
                                 CurrentOrderId = ""; 
                                 ScanInputText = ""; 
                             }); 
@@ -2724,9 +2986,47 @@ namespace ExpressPackingMonitoring.ViewModels
             }
         }
 
-        private void Speak(string text, bool cancelPrevious = true) => _speechService?.Speak(text, cancelPrevious);
-        private void SpeakWithRemarkTone(string text, bool cancelPrevious = true) => _speechService?.SpeakWithRemarkTone(text, cancelPrevious);
-        private void SpeakWarning(string text, int repeatCount = 1, bool cancelPrevious = true) => _speechService?.SpeakWarning(text, repeatCount, cancelPrevious);
+        private void Speak(string text, bool cancelPrevious = true) => PublishVoice(
+            text,
+            AlertVoiceStyle.Normal,
+            AlertSound.None,
+            repeatCount: 1,
+            interruptCurrent: cancelPrevious);
+
+        private void SpeakWithRemarkTone(string text, bool cancelPrevious = true) => PublishVoice(
+            text,
+            AlertVoiceStyle.Normal,
+            AlertSound.Remark,
+            repeatCount: 1,
+            interruptCurrent: cancelPrevious);
+
+        private void SpeakWarning(string text, int repeatCount = 1, bool cancelPrevious = true, bool playTonePerRepeat = false) => PublishVoice(
+            text,
+            AlertVoiceStyle.Warning,
+            AlertSound.Warning,
+            repeatCount: repeatCount,
+            interruptCurrent: cancelPrevious,
+            soundRepeatCount: playTonePerRepeat ? repeatCount : 1);
+
+        private void PublishVoice(
+            string text,
+            AlertVoiceStyle voiceStyle,
+            AlertSound sound,
+            int repeatCount,
+            bool interruptCurrent,
+            int soundRepeatCount = 1)
+        {
+            _alertService?.Publish(new AlertRequest
+            {
+                SpeechText = text,
+                VoiceStyle = voiceStyle,
+                Sound = sound,
+                SoundRepeatCount = soundRepeatCount,
+                SpeechRepeatCount = repeatCount,
+                InterruptCurrent = interruptCurrent,
+                DisplayDuration = TimeSpan.Zero
+            });
+        }
 
         public void Dispose()
         {
@@ -2825,6 +3125,7 @@ namespace ExpressPackingMonitoring.ViewModels
                 _motionDiff?.Dispose();
                 _motionThreshold?.Dispose();
             }
+            _alertService?.Dispose();
             _speechService?.Dispose();
             _speechService = null;
             try { _globalKeyHook?.Dispose(); } catch { }

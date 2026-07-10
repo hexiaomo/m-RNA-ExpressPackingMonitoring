@@ -1,9 +1,10 @@
 // ==UserScript==
 // @name         订单备注播报插件
 // @namespace    https://github.com/ExpressPackingMonitoring
-// @version      1.3
-// @description  从快递助手批量打印页面提取买家留言和卖家备注，发送到监控工位，打包时自动播报。v1.3 合并地址端口设置并统一回环地址。
+// @version      1.9
+// @description  从快递助手批量打印页面提取订单备注和打印后退款状态，发送到监控工位，打包时自动播报或报警。
 // @author       ExpressPackingMonitoring
+// @icon         https://raw.githubusercontent.com/m-RNA/ExpressPackingMonitoring/main/ExpressPackingMonitoring/app.ico
 // @match        *://p4.kuaidizs.cn/*
 // @match        *://kuaidizs.cn/*
 // @match        *://*.kuaidizs.cn/*
@@ -14,6 +15,7 @@
 // @grant        GM_registerMenuCommand
 // @grant        GM_getValue
 // @grant        GM_setValue
+// @noframes
 // @run-at       document-idle
 // ==/UserScript==
 
@@ -27,14 +29,37 @@
     const DISCOVERY_DONE_KEY = 'monitor_auto_discovery_done';
     const DISCOVERY_TIMEOUT = 700;
     const DISCOVERY_BATCH_SIZE = 32;
-    const CHANGELOG = 'v1.3：合并上位机地址和端口设置，统一 127.x 回环地址为 127.0.0.1';
+    const ORDER_LOOKUP_RECONNECT_MS = 250;
+    const PRINTED_REFUND_QUERY_TIMEOUT_MS = 6000;
+    const PRINTED_REFUND_STABLE_MS = 500;
+    const PRINTED_REFUND_FILTER_COOLDOWN_MS = 30000;
+    const USER_ACTIVITY_IDLE_MS = 30000;
+    const CHANGELOG = 'v1.9：用户操作页面时不切换筛选，仅在后台、失焦或空闲时自动查询';
     const DEBUG_LOG = false;
+
+    let lastUserActivityAt = Date.now();
+    function recordUserActivity(event) {
+        if (event.isTrusted) lastUserActivityAt = Date.now();
+    }
+    document.addEventListener('mousemove', recordUserActivity, { capture: true, passive: true });
+    document.addEventListener('pointerdown', recordUserActivity, { capture: true, passive: true });
+    document.addEventListener('wheel', recordUserActivity, { capture: true, passive: true });
+    document.addEventListener('touchstart', recordUserActivity, { capture: true, passive: true });
+    document.addEventListener('keydown', recordUserActivity, true);
+
+    function isUserActivelyUsingPage(now) {
+        return document.visibilityState === 'visible' &&
+            document.hasFocus() &&
+            now - lastUserActivityAt < USER_ACTIVITY_IDLE_MS;
+    }
 
     function debugLog(...args) {
         if (DEBUG_LOG) console.log(...args);
     }
 
     function getApiUrl() { return `${getBaseUrl(getMonitorAddressText())}/api/orderinfo`; }
+    function getOrderLookupPendingUrl() { return `${getBaseUrl(getMonitorAddressText())}/api/order-lookup/pending`; }
+    function getOrderLookupResultUrl() { return `${getBaseUrl(getMonitorAddressText())}/api/order-lookup/result`; }
     function getStorageUrl(host, port) { return `${getBaseUrl(host, port)}/api/storage`; }
     function getBaseUrl(host, port) {
         const address = normalizeAddress(host, port);
@@ -49,11 +74,27 @@
         if (/^127(?:\.\d{1,3}){3}$/.test(normalizedHost)) {
             normalizedHost = DEFAULT_HOST;
         }
+        if (!isAllowedMonitorHost(normalizedHost)) {
+            normalizedHost = DEFAULT_HOST;
+        }
         const parsedPort = Number(parts[1] || port || DEFAULT_PORT);
         return {
             host: normalizedHost,
             port: Number.isInteger(parsedPort) && parsedPort > 0 && parsedPort <= 65535 ? parsedPort : DEFAULT_PORT
         };
+    }
+    function isAllowedMonitorHost(host) {
+        const value = String(host || '').trim().toLowerCase();
+        if (value === 'localhost') return true;
+
+        const match = value.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+        if (!match) return false;
+        const octets = match.slice(1).map(Number);
+        if (octets.some(octet => octet < 0 || octet > 255)) return false;
+        return octets[0] === 10 ||
+            (octets[0] === 172 && octets[1] >= 16 && octets[1] <= 31) ||
+            (octets[0] === 192 && octets[1] === 168) ||
+            (octets[0] === 169 && octets[1] === 254);
     }
     function formatAddress(address) {
         const normalized = normalizeAddress(address.host, address.port);
@@ -191,11 +232,16 @@
         return '';
     }
 
+    let monitorDiscoveryPromise = null;
     async function ensureMonitorAddress(auto) {
         const shouldDiscover = auto || !GM_getValue(DISCOVERY_DONE_KEY, false);
         if (!shouldDiscover) return true;
 
-        const found = await findMonitorAddress(false);
+        if (!monitorDiscoveryPromise) {
+            monitorDiscoveryPromise = findMonitorAddress(false)
+                .finally(() => { monitorDiscoveryPromise = null; });
+        }
+        const found = await monitorDiscoveryPromise;
         if (found) {
             showNotification(`已自动填入上位机地址：${found}`);
             return true;
@@ -204,7 +250,7 @@
     }
 
     // 注册菜单命令用于修改配置
-    GM_registerMenuCommand('⚙️ 设置上位机地址', () => {
+    GM_registerMenuCommand('设置上位机地址', () => {
         const input = prompt('请输入打包监控上位机地址（IP:端口 或 http://IP:端口）：', getMonitorAddressText());
         if (input) {
             const address = saveMonitorAddress(input.trim(), DEFAULT_PORT);
@@ -216,15 +262,57 @@
         const found = await findMonitorAddress(true);
         showNotification(found ? `已自动填入：${found}` : '未找到上位机，请确认已开启 Web 服务并在同一局域网');
     });
-    GM_registerMenuCommand('发送测试订单', () => {
-        sendTestOrder();
+    GM_registerMenuCommand('发送测试订单', async () => {
+        await sendTestOrder();
     });
-    GM_registerMenuCommand('🔄 立即推送订单数据', () => {
+    GM_registerMenuCommand('立即推送订单数据', () => {
         extractAndPush();
     });
 
     // ============ 数据提取 ============
-    function extractOrders() {
+    function isTrueAttribute(element, name) {
+        return String(element?.getAttribute(name) || '').toLowerCase() === 'true';
+    }
+
+    function extractRefundInfo(row) {
+        const packageCheck = row.querySelector('.packageCheck');
+        const refundStatuses = [];
+        const refundProducts = [];
+
+        row.querySelectorAll('.order_td').forEach(td => {
+            const orderInput = td.querySelector('.orderInput');
+            const refundStatus = (td.getAttribute('data-refund-status') ||
+                orderInput?.getAttribute('data-refund-status') || '').trim().toUpperCase();
+            if (!refundStatus || refundStatus === 'NO_REFUND') return;
+
+            if (!refundStatuses.includes(refundStatus)) refundStatuses.push(refundStatus);
+            const titleEl = td.querySelector('.packageOrder_title') || td.querySelector('.packageOrder_titleShort');
+            const title = titleEl ? titleEl.textContent.trim() : '';
+            if (title && !refundProducts.includes(title)) refundProducts.push(title);
+        });
+
+        return {
+            hasRefund: isTrueAttribute(row, 'data-has-refund') ||
+                isTrueAttribute(packageCheck, 'data-has-refund') || refundStatuses.length > 0,
+            isPrintedRefund: isTrueAttribute(packageCheck, 'data-printed-refund'),
+            refundStatus: refundStatuses.join(','),
+            refundProductInfo: refundProducts.join('，')
+        };
+    }
+
+    function extractTrackingNumber(row) {
+        const sendSuccessTag = row.querySelector('.sendSuccessTag');
+        if (sendSuccessTag) {
+            const value = (sendSuccessTag.getAttribute('data-ydno') || sendSuccessTag.textContent || '').trim();
+            if (value) return value;
+        }
+
+        const kdInput = row.querySelector('.kdNoInput');
+        return kdInput ? (kdInput.value || kdInput.getAttribute('title') || '').trim() : '';
+    }
+
+    function extractOrders(options) {
+        options = options || {};
         const orders = [];
         // 每个 .packageItem 是一个订单行
         document.querySelectorAll('tr.packageItem').forEach(row => {
@@ -232,15 +320,7 @@
                 const togetherId = row.getAttribute('data-together-id') || '';
 
                 // 1. 快递单号：从发货成功标签或快递单号输入框中提取
-                let trackingNumber = '';
-                const sendSuccessTag = row.querySelector('.sendSuccessTag');
-                if (sendSuccessTag) {
-                    trackingNumber = (sendSuccessTag.getAttribute('data-ydno') || sendSuccessTag.textContent || '').trim();
-                }
-                if (!trackingNumber) {
-                    const kdInput = row.querySelector('.kdNoInput');
-                    if (kdInput) trackingNumber = (kdInput.value || kdInput.getAttribute('title') || '').trim();
-                }
+                const trackingNumber = extractTrackingNumber(row);
 
                 // 2. 买家留言和卖家备注：从 checkbox 的 data 属性提取
                 let buyerMessage = '';
@@ -299,6 +379,7 @@
 
                 // 4. 订单号（淘宝交易号）
                 const orderId = togetherId;
+                const refundInfo = extractRefundInfo(row);
 
                 if (trackingNumber || buyerMessage || sellerMemo || productInfo) {
                     orders.push({
@@ -306,7 +387,11 @@
                         orderId: orderId,
                         buyerMessage: buyerMessage,
                         sellerMemo: sellerMemo,
-                        productInfo: productInfo
+                        productInfo: productInfo,
+                        hasRefund: refundInfo.hasRefund,
+                        isPrintedRefund: refundInfo.isPrintedRefund,
+                        refundStatus: refundInfo.refundStatus,
+                        refundProductInfo: refundInfo.refundProductInfo
                     });
                 }
             } catch (e) {
@@ -324,7 +409,8 @@
     async function pushToMonitor(orders, options) {
         options = options || {};
         if (!orders || orders.length === 0) return { ok: false, confirmed: false, error: 'empty' };
-        await ensureMonitorAddress(false);
+        if (!options.skipAddressDiscovery)
+            await ensureMonitorAddress(false);
 
         return new Promise(resolve => {
             GM_xmlhttpRequest({
@@ -338,31 +424,151 @@
                     if (res.status === 200) {
                         debugLog(`[打包监控] 推送成功: ${orders.length} 条`, response);
                         const confirmed = !options.isTest || Number(response.testCount || 0) > 0;
-                        if (options.isTest) {
+                        if (options.silent) {
+                            debugLog(`[打包监控] 后台推送成功: ${orders.length} 条`);
+                        } else if (options.isTest) {
                             showNotification(confirmed ? '监控工位已收到测试订单' : '测试订单已发送，请查看监控端是否播报');
                         } else {
-                            showNotification(`✅ 已推送 ${orders.length} 条订单到打包监控`);
+                            showNotification(`已推送 ${orders.length} 条订单到打包监控`);
                         }
                         resolve({ ok: true, confirmed, response });
                         return;
                     }
 
                     console.warn('[打包监控] 推送失败:', res.status, res.responseText);
-                    showNotification(options.isTest ? '测试发送失败，请检查监控工位地址' : `❌ 推送失败: ${res.status}`);
+                    if (!options.silent) showNotification(options.isTest ? '测试发送失败，请检查监控工位地址' : `推送失败: ${res.status}`);
                     resolve({ ok: false, confirmed: false, status: res.status, response });
                 },
                 onerror: function (err) {
                     console.warn('[打包监控] 连接失败，请确认上位机已启动 Web 服务:', err);
-                    showNotification(options.isTest ? '测试发送失败，请检查监控工位地址' : '⚠️ 无法连接上位机，请检查 IP/端口设置');
+                    if (!options.silent) showNotification(options.isTest ? '测试发送失败，请检查监控工位地址' : '无法连接上位机，请检查 IP/端口设置');
                     resolve({ ok: false, confirmed: false, error: 'connect' });
                 },
                 ontimeout: function () {
                     console.warn('[打包监控] 推送超时');
-                    showNotification(options.isTest ? '测试发送超时，请检查监控工位地址' : '⏱ 推送超时，请检查网络');
+                    if (!options.silent) showNotification(options.isTest ? '测试发送超时，请检查监控工位地址' : '推送超时，请检查网络');
                     resolve({ ok: false, confirmed: false, error: 'timeout' });
                 }
             });
         });
+    }
+
+    function requestMonitor(method, url, data, timeout) {
+        return new Promise(resolve => {
+            GM_xmlhttpRequest({
+                method: method,
+                url: url,
+                headers: data ? { 'Content-Type': 'application/json' } : undefined,
+                data: data ? JSON.stringify(data) : undefined,
+                timeout: timeout || 3000,
+                onload: res => resolve({ status: res.status, body: parseJsonResponse(res.responseText) }),
+                onerror: () => resolve({ status: 0, body: {} }),
+                ontimeout: () => resolve({ status: 0, body: {} })
+            });
+        });
+    }
+
+    function delay(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    function getOrderListSignature() {
+        return Array.from(document.querySelectorAll('tr.packageItem')).map(row => {
+            const togetherId = row.getAttribute('data-together-id') || '';
+            const trackingNumber = extractTrackingNumber(row);
+            const refundStatus = Array.from(row.querySelectorAll('[data-refund-status]'))
+                .map(element => element.getAttribute('data-refund-status') || '')
+                .join(',');
+            return `${togetherId}|${trackingNumber}|${refundStatus}`;
+        }).join('||');
+    }
+
+    let lastPrintedRefundFilterClickAt = 0;
+    async function queryPrintedRefundSnapshot() {
+        const selector = '[data-act-name="searchQuickQuery"][data-status="4"]';
+        let refundFilter = document.querySelector(selector);
+        if (!refundFilter) {
+            throw new Error('当前不是快递助手批量打印页面，无法找到“打印后退款”快捷查询');
+        }
+
+        if (refundFilter.classList.contains('checked')) {
+            return extractOrders();
+        }
+
+        const now = Date.now();
+        if (isUserActivelyUsingPage(now)) {
+            throw new Error('检测到用户正在操作快递助手，本次不切换页面，已使用监控端最近缓存');
+        }
+        if (now - lastPrintedRefundFilterClickAt < PRINTED_REFUND_FILTER_COOLDOWN_MS) {
+            throw new Error('打印后退款查询正在安全冷却，已使用监控端最近缓存');
+        }
+
+        let lastSignature = getOrderListSignature();
+        let listChanged = false;
+        let stableSince = Date.now();
+        lastPrintedRefundFilterClickAt = now;
+        refundFilter.click();
+
+        const deadline = Date.now() + PRINTED_REFUND_QUERY_TIMEOUT_MS;
+        while (Date.now() < deadline) {
+            await delay(100);
+            const signature = getOrderListSignature();
+            if (signature !== lastSignature) {
+                lastSignature = signature;
+                listChanged = true;
+                stableSince = Date.now();
+            }
+
+            refundFilter = document.querySelector(selector);
+            if (refundFilter?.classList.contains('checked') &&
+                listChanged &&
+                Date.now() - stableSince >= PRINTED_REFUND_STABLE_MS) {
+                return extractOrders();
+            }
+        }
+
+        throw new Error('打印后退款列表未在限定时间内完成刷新，已改用监控端最近缓存');
+    }
+
+    let orderLookupPollStarted = false;
+    async function pollOrderLookupRequests() {
+        try {
+            if (!document.querySelector('tr.packageItem, select.extendSearchList')) {
+                return;
+            }
+            const response = await requestMonitor('GET', getOrderLookupPendingUrl(), null, 25000);
+            const pending = response.status === 200 ? response.body : null;
+            if (pending?.pending && pending.requestId) {
+                let orders = [];
+                let success = false;
+                let error = '';
+                try {
+                    orders = await queryPrintedRefundSnapshot();
+                    success = true;
+                } catch (e) {
+                    error = e?.message || String(e);
+                    console.warn('[打包监控] 获取打印后退款列表失败:', error);
+                }
+
+                await requestMonitor('POST', getOrderLookupResultUrl(), {
+                    requestId: pending.requestId,
+                    success: success,
+                    orders: orders,
+                    error: error
+                }, 5000);
+                debugLog(`[打包监控] 已回传打印后退款订单快照: success=${success}, ${orders.length} 条`);
+            }
+        } catch (e) {
+            debugLog('[打包监控] 轮询扫码核验请求失败:', e);
+        } finally {
+            setTimeout(pollOrderLookupRequests, ORDER_LOOKUP_RECONNECT_MS);
+        }
+    }
+
+    function startOrderLookupPolling() {
+        if (orderLookupPollStarted) return;
+        orderLookupPollStarted = true;
+        pollOrderLookupRequests();
     }
 
     function buildTestOrder() {
@@ -380,18 +586,35 @@
         }];
     }
 
+    let testOrderSending = false;
     async function sendTestOrder() {
-        showNotification('正在发送测试订单，用于确认监控工位能否收到订单备注');
-        await pushToMonitor(buildTestOrder(), { isTest: true });
-    }
-
-    async function extractAndPush() {
-        const orders = extractOrders();
-        if (orders.length === 0) {
-            showNotification('📭 当前页面没有找到订单信息');
+        if (testOrderSending) {
+            showNotification('测试订单正在发送，请稍候');
             return;
         }
-        await pushToMonitor(orders);
+
+        testOrderSending = true;
+        showNotification('正在发送测试订单，用于确认监控工位能否收到订单备注');
+        try {
+            const connected = await ensureMonitorAddress(true);
+            if (!connected) {
+                showNotification('测试发送失败，未找到监控工位');
+                return;
+            }
+            await pushToMonitor(buildTestOrder(), { isTest: true, skipAddressDiscovery: true });
+        } finally {
+            testOrderSending = false;
+        }
+    }
+
+    async function extractAndPush(options) {
+        options = options || {};
+        const orders = extractOrders(options);
+        if (orders.length === 0) {
+            if (!options.silent) showNotification('当前页面没有找到订单信息');
+            return;
+        }
+        await pushToMonitor(orders, options);
     }
 
     // ============ 页面通知 ============
@@ -412,10 +635,11 @@
 
     // ============ 自动推送：监听页面变化 + 操作按钮点击 ============
     let pushTimer = null;
-    function schedulePush() {
+    function schedulePush(options) {
+        options = options || {};
         if (pushTimer) clearTimeout(pushTimer);
         pushTimer = setTimeout(() => {
-            extractAndPush();
+            extractAndPush(options);
         }, 2000); // 页面加载/翻页后 2 秒自动推送
     }
 
@@ -462,7 +686,7 @@
     });
 
     // 延迟启动观察，等页面加载
-    setTimeout(() => {
+    setTimeout(async () => {
         // 优先监听订单列表容器，fallback 到 body
         const target = document.querySelector('.dfdd_container') ||
                        document.querySelector('.packageItem')?.closest('table')?.parentElement ||
@@ -471,9 +695,10 @@
         debugLog('[打包监控] DOM 监听已启动, 目标:', target.tagName, target.className || '(body)');
         // 绑定操作按钮监听
         bindActionButtons();
-        ensureMonitorAddress(true);
+        await ensureMonitorAddress(true);
         // 首次推送
         extractAndPush();
+        startOrderLookupPolling();
     }, 3000);
 
     debugLog('[打包监控] 油猴脚本已加载', CHANGELOG);

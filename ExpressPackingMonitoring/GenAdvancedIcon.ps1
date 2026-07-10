@@ -88,18 +88,28 @@ public class AdvancedIconGenerator {
                     using (StringFormat format = new StringFormat() { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center }) {
                         // 256, 64, 48 show "打包\n监控", 32 and 16 show "包"
                         if (size >= 48) {
-                            float fontSize = size * 0.23f;
+                            float fontSize = size * 0.25f + (size == 48 ? 1f : 0f);
+                            float opticalOffsetY = size * 0.025f + (size == 48 ? 1f : 0f);
                             using (Font font = new Font("Microsoft YaHei", fontSize, FontStyle.Bold)) {
-                                RectangleF r1 = new RectangleF(0, margin + size * 0.05f, size, size * 0.45f);
-                                RectangleF r2 = new RectangleF(0, margin + size * 0.40f, size, size * 0.45f);
+                                RectangleF r1 = new RectangleF(0, margin + size * 0.05f + opticalOffsetY, size, size * 0.45f);
+                                RectangleF r2 = new RectangleF(0, margin + size * 0.40f + opticalOffsetY, size, size * 0.45f);
                                 g.DrawString("打包", font, textBrush, r1, format);
                                 g.DrawString("监控", font, textBrush, r2, format);
                             }
                         } else {
-                            float fontSize = size <= 16 ? 10.5f : size * 0.55f;
+                            float fontSize = size <= 16 ? 11.5f : size * 0.60f;
                             using (Font font = new Font("Microsoft YaHei", fontSize, FontStyle.Bold)) {
-                                RectangleF rect = new RectangleF(0, size <= 16 ? -1 : size * -0.05f, size, size);
-                                g.DrawString("包", font, textBrush, rect, format);
+                                using (GraphicsPath textPath = new GraphicsPath()) {
+                                    textPath.AddString("包", font.FontFamily, (int)font.Style, font.Size, PointF.Empty, StringFormat.GenericTypographic);
+                                    RectangleF bounds = textPath.GetBounds();
+                                    using (Matrix transform = new Matrix()) {
+                                        transform.Translate(
+                                            (size - bounds.Width) / 2f - bounds.X,
+                                            (size - bounds.Height) / 2f - bounds.Y);
+                                        textPath.Transform(transform);
+                                    }
+                                    g.FillPath(textBrush, textPath);
+                                }
                             }
                         }
                     }
@@ -136,7 +146,18 @@ public class AdvancedIconGenerator {
 }
 "@
 
-Add-Type -TypeDefinition $source -ReferencedAssemblies System.Drawing
+$drawingReferences = if ($PSVersionTable.PSEdition -eq 'Core') {
+    @(
+        'System.Drawing.Common'
+        'System.Drawing.Primitives'
+        'System.Private.Windows.GdiPlus'
+        'System.Private.Windows.Core'
+    ) | ForEach-Object { [System.Reflection.Assembly]::Load($_).Location }
+} else {
+    @('System.Drawing')
+}
+
+Add-Type -TypeDefinition $source -ReferencedAssemblies $drawingReferences -ErrorAction Stop
 $outputPath = Join-Path $PSScriptRoot "app.ico"
 [AdvancedIconGenerator]::BuildIcon($outputPath)
-Write-Host "Multi-resolution icon correctly generated with zero compilation errors expected."
+Write-Host "Multi-resolution icon generated successfully."
