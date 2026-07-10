@@ -1427,6 +1427,7 @@ namespace ExpressPackingMonitoring.Services
             if (_disposed) return;
             _disposed = true;
             _cts.Cancel();
+            try { _clipService.Dispose(); } catch { }
             try { _listener.Stop(); } catch { }
             try { _listener.Close(); } catch { }
             _cts.Dispose();

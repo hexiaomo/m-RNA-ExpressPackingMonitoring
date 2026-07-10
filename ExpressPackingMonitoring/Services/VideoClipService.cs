@@ -26,8 +26,11 @@ namespace ExpressPackingMonitoring.Services
         public int FrameIndex { get; set; } = -1;
     }
 
-    public sealed class VideoClipService
+    public sealed class VideoClipService : IDisposable
     {
+        private const int MaxTrackedClipTasks = 100;
+        private const int MaxPreviewLockEntries = 2048;
+        private static readonly TimeSpan CompletedTaskRetention = TimeSpan.FromMinutes(30);
         private readonly VideoDatabase _db;
         private readonly Action<string> _log;
         private readonly Func<VideoRecord, MkvConversionResult> _mkvConverter;
@@ -35,7 +38,11 @@ namespace ExpressPackingMonitoring.Services
         private readonly Action _requestCacheCleanup;
         private readonly ConcurrentDictionary<string, ClipTaskState> _tasks = new();
         private readonly ConcurrentDictionary<string, object> _previewLocks = new(StringComparer.OrdinalIgnoreCase);
+        private readonly object _taskRegistrationLock = new();
         private readonly SemaphoreSlim _previewFfmpegLock = new(1, 1);
+        private readonly SemaphoreSlim _prewarmSlots = new(2, 2);
+        private readonly SemaphoreSlim _clipSlots = new(2, 2);
+        private volatile bool _disposed;
 
         public VideoClipService(
             VideoDatabase db,
@@ -101,6 +108,7 @@ namespace ExpressPackingMonitoring.Services
 
         public void PrewarmPreviewFrames(long videoId, double startSeconds, double endSeconds, string previewSide = "")
         {
+            ThrowIfDisposed();
             var record = GetAvailableRecord(videoId);
             string sourcePath = ResolveClipSourcePath(record);
             double duration = ResolveDuration(record);
@@ -126,20 +134,34 @@ namespace ExpressPackingMonitoring.Services
                 }
             }
 
+            if (!_prewarmSlots.Wait(0))
+            {
+                _log("VideoClip PrewarmPreviewFrames: busy, skipped duplicate prewarm request");
+                return;
+            }
+
             _ = Task.Run(() =>
             {
-                bool generatedAny = false;
-                foreach (double second in seconds.OrderBy(x => x))
+                try
                 {
-                    try
+                    bool generatedAny = false;
+                    foreach (double second in seconds.OrderBy(x => x))
                     {
-                        EnsurePreviewFrame(videoId, sourcePath, second, duration, "prewarm", requestCleanup: false);
-                        generatedAny = true;
+                        if (_disposed) break;
+                        try
+                        {
+                            EnsurePreviewFrame(videoId, sourcePath, second, duration, "prewarm", requestCleanup: false);
+                            generatedAny = true;
+                        }
+                        catch (Exception ex) { _log($"VideoClip PrewarmPreviewFrames: {second:F1}s failed, {ex.Message}"); }
                     }
-                    catch (Exception ex) { _log($"VideoClip PrewarmPreviewFrames: {second:F1}s failed, {ex.Message}"); }
+                    if (generatedAny)
+                        RequestCacheCleanup();
                 }
-                if (generatedAny)
-                    RequestCacheCleanup();
+                finally
+                {
+                    _prewarmSlots.Release();
+                }
             });
         }
 
@@ -211,6 +233,7 @@ namespace ExpressPackingMonitoring.Services
 
         public string StartClip(long videoId, double startSeconds, double endSeconds)
         {
+            ThrowIfDisposed();
             var record = GetAvailableRecord(videoId);
             string sourcePath = ResolveClipSourcePath(record);
             double duration = ResolveDuration(record);
@@ -226,12 +249,19 @@ namespace ExpressPackingMonitoring.Services
             var task = new ClipTaskState
             {
                 TaskId = taskId,
-                Status = "running",
-                Message = "监控端正在剪辑中，请稍候……",
+                Status = "queued",
+                Message = "剪辑任务已排队，请稍候……",
                 OutputPath = outputPath,
-                DownloadUrl = "/api/clips/" + Uri.EscapeDataString(outputName)
+                DownloadUrl = "/api/clips/" + Uri.EscapeDataString(outputName),
+                CreatedAtUtc = DateTime.UtcNow
             };
-            _tasks[taskId] = task;
+            lock (_taskRegistrationLock)
+            {
+                CleanupTrackedTasks();
+                if (_tasks.Count >= MaxTrackedClipTasks)
+                    throw new InvalidOperationException("剪辑任务过多，请稍后重试");
+                _tasks[taskId] = task;
+            }
 
             _ = Task.Run(() => RunClipTask(task, sourcePath, startSeconds, endSeconds));
             return taskId;
@@ -268,6 +298,7 @@ namespace ExpressPackingMonitoring.Services
                 task.CancelRequested = true;
                 task.Status = "canceled";
                 task.Message = "剪辑已取消";
+                task.CompletedAtUtc = DateTime.UtcNow;
                 try
                 {
                     if (task.Process != null && !task.Process.HasExited)
@@ -299,9 +330,21 @@ namespace ExpressPackingMonitoring.Services
             string tmpPath = GetTempClipPath(task.OutputPath);
             double duration = endSeconds - startSeconds;
             string args = $"-y -ss {FormatSeconds(startSeconds)} -i {Quote(inputPath)} -t {FormatSeconds(duration)} -map 0:v:0 -map 0:a? -c copy -avoid_negative_ts make_zero -movflags +faststart -f mp4 {Quote(tmpPath)}";
+            bool slotEntered = false;
             try
             {
-                var result = RunFFmpeg(args, tmpPath, 0, task);
+                _clipSlots.Wait();
+                slotEntered = true;
+                lock (task.Sync)
+                {
+                    if (_disposed || task.CancelRequested || task.Status == "canceled")
+                        return;
+                    task.Status = "running";
+                    task.Message = "监控端正在剪辑中，请稍候……";
+                }
+
+                int timeoutMs = (int)Math.Clamp(duration * 2000 + 60_000, 60_000, 15 * 60_000);
+                var result = RunFFmpeg(args, tmpPath, timeoutMs, task);
                 lock (task.Sync)
                 {
                     if (task.CancelRequested || task.Status == "canceled")
@@ -345,7 +388,12 @@ namespace ExpressPackingMonitoring.Services
                 {
                     task.Process?.Dispose();
                     task.Process = null;
+                    if (task.Status is "completed" or "failed" or "canceled")
+                        task.CompletedAtUtc ??= DateTime.UtcNow;
                 }
+                if (slotEntered)
+                    _clipSlots.Release();
+                CleanupTrackedTasks();
             }
         }
 
@@ -526,7 +574,79 @@ namespace ExpressPackingMonitoring.Services
                         RequestCacheCleanup();
                 }
             }
+            CleanupPreviewLocksIfNeeded();
             return path;
+        }
+
+        private void CleanupTrackedTasks()
+        {
+            DateTime cutoff = DateTime.UtcNow - CompletedTaskRetention;
+            foreach (var item in _tasks)
+            {
+                ClipTaskState task = item.Value;
+                bool remove;
+                lock (task.Sync)
+                    remove = task.CompletedAtUtc.HasValue && task.CompletedAtUtc.Value < cutoff;
+                if (remove)
+                    _tasks.TryRemove(item.Key, out _);
+            }
+
+            if (_tasks.Count < MaxTrackedClipTasks)
+                return;
+
+            foreach (var item in _tasks
+                         .Where(x => x.Value.CompletedAtUtc.HasValue)
+                         .OrderBy(x => x.Value.CompletedAtUtc)
+                         .ToList())
+            {
+                if (_tasks.Count < MaxTrackedClipTasks)
+                    break;
+                _tasks.TryRemove(item.Key, out _);
+            }
+        }
+
+        private void CleanupPreviewLocksIfNeeded()
+        {
+            if (_previewLocks.Count <= MaxPreviewLockEntries)
+                return;
+
+            foreach (var item in _previewLocks)
+            {
+                if (_previewLocks.Count <= MaxPreviewLockEntries / 2)
+                    break;
+                if (IsUsableFile(item.Key))
+                    _previewLocks.TryRemove(item.Key, out _);
+            }
+        }
+
+        private void ThrowIfDisposed()
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+        }
+
+        public void Dispose()
+        {
+            if (_disposed) return;
+            _disposed = true;
+
+            foreach (ClipTaskState task in _tasks.Values)
+            {
+                lock (task.Sync)
+                {
+                    if (task.Status is "completed" or "failed" or "canceled")
+                        continue;
+                    task.CancelRequested = true;
+                    task.Status = "canceled";
+                    task.Message = "服务已停止，剪辑已取消";
+                    task.CompletedAtUtc = DateTime.UtcNow;
+                    try
+                    {
+                        if (task.Process != null && !task.Process.HasExited)
+                            task.Process.Kill(entireProcessTree: true);
+                    }
+                    catch { }
+                }
+            }
         }
 
         private void ExtractPreviewFrameOrThrow(string filePath, double seconds, double duration, string outputPath, string label)
@@ -669,6 +789,8 @@ namespace ExpressPackingMonitoring.Services
             public string DownloadUrl { get; set; }
             public bool CancelRequested { get; set; }
             public Process Process { get; set; }
+            public DateTime CreatedAtUtc { get; set; }
+            public DateTime? CompletedAtUtc { get; set; }
             public object Sync { get; } = new();
         }
 
