@@ -28,6 +28,7 @@ namespace ExpressPackingMonitoring.Audio
 
     public class SpeechService : IDisposable
     {
+        private static readonly TimeSpan EdgeTtsTimeout = TimeSpan.FromSeconds(20);
         private SpeechSynthesizer? _ttsNormal;
         private SpeechSynthesizer? _ttsWarning;
         private OfflineTts? _kokoroTts;
@@ -44,6 +45,7 @@ namespace ExpressPackingMonitoring.Audio
         private BlockingCollection<(string text, bool isWarning)>? _preGenQueue;
         private Thread? _preGenThread;
         private readonly ManualResetEventSlim _speechProcessingGate = new(initialState: true);
+        private readonly CancellationTokenSource _disposeCts = new();
         private readonly object _speechStateLock = new();
         private readonly object _filePlaybackLock = new();
         private IWavePlayer? _currentFileWaveOut;
@@ -402,26 +404,74 @@ namespace ExpressPackingMonitoring.Audio
             var client = new EdgeTTSClient(false, false, 0);
             try
             {
-                var result = client.SynthesisAsync(text, voice, "+0Hz", ToEdgeRate(AiTtsSpeed), "+0%")
-                    .GetAwaiter()
-                    .GetResult();
+                var synthesisTask = client.SynthesisAsync(text, voice, "+0Hz", ToEdgeRate(AiTtsSpeed), "+0%");
+                Result result;
+                try
+                {
+                    result = synthesisTask
+                        .WaitAsync(EdgeTtsTimeout, _disposeCts.Token)
+                        .GetAwaiter()
+                        .GetResult();
+                }
+                catch (TimeoutException)
+                {
+                    ObserveFault(synthesisTask);
+                    throw new TimeoutException($"Edge TTS 请求超过 {EdgeTtsTimeout.TotalSeconds:0} 秒");
+                }
+                catch (OperationCanceledException) when (_disposeCts.IsCancellationRequested)
+                {
+                    ObserveFault(synthesisTask);
+                    throw;
+                }
 
                 if (result.Code != ResultCode.Success || result.Data == null || result.Data.Length == 0)
                     throw new InvalidOperationException($"Edge TTS failed: {result.Code} {result.Message}");
 
                 File.WriteAllBytes(tempPath, result.Data.ToArray());
             }
+            catch
+            {
+                TryDeleteFile(tempPath);
+                throw;
+            }
             finally
             {
                 try { client.Dispose(); } catch { }
             }
 
-            if (!File.Exists(tempPath) || new FileInfo(tempPath).Length == 0)
-                throw new InvalidOperationException("Edge TTS did not create audio output.");
+            try
+            {
+                if (!File.Exists(tempPath) || new FileInfo(tempPath).Length == 0)
+                    throw new InvalidOperationException("Edge TTS did not create audio output.");
 
-            if (File.Exists(outputPath)) File.Delete(outputPath);
-            File.Move(tempPath, outputPath);
-            Debug.WriteLine($"[SpeechService] PreGenerate Edge cached: {Path.GetFileName(outputPath)} ({new FileInfo(outputPath).Length / 1024}KB)");
+                if (File.Exists(outputPath)) File.Delete(outputPath);
+                File.Move(tempPath, outputPath);
+                Debug.WriteLine($"[SpeechService] PreGenerate Edge cached: {Path.GetFileName(outputPath)} ({new FileInfo(outputPath).Length / 1024}KB)");
+            }
+            finally
+            {
+                TryDeleteFile(tempPath);
+            }
+        }
+
+        private static void TryDeleteFile(string path)
+        {
+            try { if (File.Exists(path)) File.Delete(path); } catch { }
+        }
+
+        private static void ObserveFault(Task task)
+        {
+            if (task.IsCompleted)
+            {
+                _ = task.Exception;
+                return;
+            }
+
+            _ = task.ContinueWith(
+                completed => _ = completed.Exception,
+                CancellationToken.None,
+                TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+                TaskScheduler.Default);
         }
 
         private void PlayAudioFileBlocking(string path)
@@ -1195,6 +1245,7 @@ namespace ExpressPackingMonitoring.Audio
         {
             if (Interlocked.Exchange(ref _disposeStarted, 1) != 0) return;
             _isDisposed = true;
+            _disposeCts.Cancel();
             Stop();
             _speechProcessingGate.Set();
             _idleUnloadTimer?.Dispose();
@@ -1244,6 +1295,7 @@ namespace ExpressPackingMonitoring.Audio
             _speechQueue?.Dispose();
             _preGenQueue?.Dispose();
             _speechProcessingGate.Dispose();
+            _disposeCts.Dispose();
         }
     }
 }
