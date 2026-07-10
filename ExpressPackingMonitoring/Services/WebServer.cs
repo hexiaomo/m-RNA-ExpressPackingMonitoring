@@ -34,6 +34,9 @@ namespace ExpressPackingMonitoring.Services
 
     public sealed class WebServer : IDisposable
     {
+        private const int MaxJsonBodyBytes = 64 * 1024;
+        private const int MaxOrderInfoBodyBytes = 1024 * 1024;
+        private const int MaxOrderInfoItems = 200;
         private HttpListener _listener;
         private readonly VideoDatabase _db;
         private readonly Func<bool> _isRecordingProvider;
@@ -225,6 +228,16 @@ namespace ExpressPackingMonitoring.Services
                 ctx.Response.Headers.Add("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
                 ctx.Response.Headers.Add("Access-Control-Allow-Headers", "Content-Type");
 
+                if (method == "POST")
+                {
+                    int maxBodyBytes = path == "/api/orderinfo" ? MaxOrderInfoBodyBytes : MaxJsonBodyBytes;
+                    if (ctx.Request.ContentLength64 > maxBodyBytes)
+                    {
+                        SendJson(ctx, 413, new { error = $"请求内容过大，最大允许 {maxBodyBytes / 1024} KB" });
+                        return;
+                    }
+                }
+
                 if (method == "OPTIONS")
                 {
                     ctx.Response.StatusCode = 204;
@@ -356,14 +369,14 @@ namespace ExpressPackingMonitoring.Services
         {
             try
             {
-                using var reader = new StreamReader(ctx.Request.InputStream, ctx.Request.ContentEncoding);
-                string body = reader.ReadToEnd();
+                string body = ReadRequestBody(ctx, MaxOrderInfoBodyBytes);
                 var items = JsonSerializer.Deserialize<List<OrderInfo>>(body, _jsonOptions);
                 if (items == null || items.Count == 0)
                 {
                     SendJson(ctx, 400, new { error = "空数据" });
                     return;
                 }
+                ValidateOrderInfoItems(items);
 
                 int count = 0;
                 var realItems = items.Where(x => !x.IsTest).ToList();
@@ -1312,9 +1325,55 @@ namespace ExpressPackingMonitoring.Services
 
         private static T ReadJsonBody<T>(HttpListenerContext ctx)
         {
-            using var reader = new StreamReader(ctx.Request.InputStream, ctx.Request.ContentEncoding);
-            string body = reader.ReadToEnd();
+            string body = ReadRequestBody(ctx, MaxJsonBodyBytes);
             return JsonSerializer.Deserialize<T>(body, _jsonOptions) ?? throw new InvalidDataException("请求内容无效");
+        }
+
+        private static string ReadRequestBody(HttpListenerContext ctx, int maxBytes)
+        {
+            long contentLength = ctx.Request.ContentLength64;
+            if (contentLength > maxBytes)
+                throw new InvalidDataException($"请求内容过大，最大允许 {maxBytes / 1024} KB");
+
+            int capacity = contentLength > 0 ? (int)Math.Min(contentLength, maxBytes) : 0;
+            using var buffer = new MemoryStream(capacity);
+            byte[] chunk = new byte[8192];
+            int totalBytes = 0;
+            while (true)
+            {
+                int read = ctx.Request.InputStream.Read(chunk, 0, chunk.Length);
+                if (read <= 0) break;
+                totalBytes += read;
+                if (totalBytes > maxBytes)
+                    throw new InvalidDataException($"请求内容过大，最大允许 {maxBytes / 1024} KB");
+                buffer.Write(chunk, 0, read);
+            }
+
+            Encoding encoding = ctx.Request.ContentEncoding ?? Encoding.UTF8;
+            return encoding.GetString(buffer.GetBuffer(), 0, checked((int)buffer.Length));
+        }
+
+        private static void ValidateOrderInfoItems(List<OrderInfo> items)
+        {
+            if (items.Count > MaxOrderInfoItems)
+                throw new InvalidDataException($"单次最多推送 {MaxOrderInfoItems} 条订单");
+
+            foreach (OrderInfo item in items)
+            {
+                if (item == null)
+                    throw new InvalidDataException("订单数据包含空项");
+                ValidateFieldLength(item.TrackingNumber, 128, "快递单号");
+                ValidateFieldLength(item.OrderId, 128, "订单号");
+                ValidateFieldLength(item.BuyerMessage, 2000, "买家留言");
+                ValidateFieldLength(item.SellerMemo, 2000, "卖家备注");
+                ValidateFieldLength(item.ProductInfo, 4000, "商品信息");
+            }
+        }
+
+        private static void ValidateFieldLength(string value, int maxLength, string fieldName)
+        {
+            if ((value?.Length ?? 0) > maxLength)
+                throw new InvalidDataException($"{fieldName}过长，最多允许 {maxLength} 个字符");
         }
 
         private static bool TryFindVideoId(string path, string suffix, out long id)
