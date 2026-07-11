@@ -472,6 +472,7 @@ namespace ExpressPackingMonitoring.ViewModels
             });
             InitDatabase();
             RefreshTodayStats();
+            RestoreRecentScanRecords();
             _speechService = new SpeechService
             {
                 EnableSoundPrompt = Config.EnableSoundPrompt,
@@ -583,6 +584,30 @@ namespace ExpressPackingMonitoring.ViewModels
                 OnPropertyChanged(nameof(TotalPackTimeDisplay)); OnPropertyChanged(nameof(AveragePackTimeDisplay));
             }
             catch { }
+        }
+
+        private void RestoreRecentScanRecords()
+        {
+            try
+            {
+                var records = _db?.GetRecentCompletedVideos(DateTime.Today, 20);
+                if (records == null) return;
+
+                _allLogs.Clear();
+                foreach (var record in records)
+                {
+                    _allLogs.Add(new ScanRecord(
+                        record.OrderId,
+                        "已保存",
+                        record.StartTime.ToString("HH:mm:ss"),
+                        record.Mode));
+                }
+                FilterLogs();
+            }
+            catch (Exception ex)
+            {
+                RuntimeLog.Error("ScanHistory", "Failed to restore recent scan records", ex);
+            }
         }
 
         private void ToggleMode() { CurrentMode = CurrentMode == "发货" ? "退货" : "发货"; ShowToast($"已切换为: {CurrentMode}"); Speak(CurrentMode == "发货" ? DefaultSpeechCatalog.SwitchToShipping : DefaultSpeechCatalog.SwitchToReturn); }

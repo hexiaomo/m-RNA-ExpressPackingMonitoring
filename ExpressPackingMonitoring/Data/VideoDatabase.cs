@@ -450,6 +450,46 @@ namespace ExpressPackingMonitoring.Data
         }
 
         /// <summary>
+        /// 获取指定日期最近完成且未删除的扫码录像记录。
+        /// </summary>
+        public List<VideoRecord> GetRecentCompletedVideos(DateTime date, int limit = 10)
+        {
+            if (limit <= 0) return new List<VideoRecord>();
+
+            lock (_lock)
+            {
+                var results = new List<VideoRecord>();
+                using var cmd = _connection.CreateCommand();
+                cmd.CommandText = @"
+                    SELECT Id, OrderId, Mode, StartTime
+                    FROM VideoRecords
+                    WHERE IsDeleted = 0
+                      AND EndTime IS NOT NULL
+                      AND StartTime >= @startTime
+                      AND StartTime < @endTime
+                    ORDER BY StartTime DESC
+                    LIMIT @limit;";
+                cmd.Parameters.AddWithValue("@startTime", date.Date.ToString("yyyy-MM-dd HH:mm:ss"));
+                cmd.Parameters.AddWithValue("@endTime", date.Date.AddDays(1).ToString("yyyy-MM-dd HH:mm:ss"));
+                cmd.Parameters.AddWithValue("@limit", limit);
+
+                using var reader = cmd.ExecuteReader();
+                while (reader.Read())
+                {
+                    results.Add(new VideoRecord
+                    {
+                        Id = reader.GetInt64(0),
+                        OrderId = reader.GetString(1),
+                        Mode = reader.GetString(2),
+                        StartTime = DateTime.Parse(reader.GetString(3))
+                    });
+                }
+
+                return results;
+            }
+        }
+
+        /// <summary>
         /// 查询视频列表（支持日期范围 + 关键词过滤，包含已删除记录）
         /// </summary>
         public VideoRecord GetVideoById(long id)
