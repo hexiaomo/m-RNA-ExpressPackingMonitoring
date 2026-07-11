@@ -40,9 +40,10 @@ pwsh -NoProfile -File Tools\Publish-CleanPackage.ps1
 - The launcher must not update itself. If launcher source or project configuration changes, disable AppPatch for that release and require a full package update.
 - AppPatch packages are fixed-baseline cumulative patches. The default patch baseline is `0.0.18`, but scripts may allow overriding it when a new formal baseline is chosen.
 - Keep update URLs configurable through environment variables or `.env`. The default update check URL is GitHub releases latest API; `.env` may point to another release provider.
-- Do not generate AppFull packages. Release uploads normally include the full zip, `update_vX.Y.Z.json`, optional `ExpressPackingMonitoring_AppPatch_vX.Y.Z.zip`, and `launcher_manifest_vX.Y.Z.json`.
+- Do not generate AppFull packages. GitHub Release uploads normally include the full zip, `update_vX.Y.Z.json`, and optional `ExpressPackingMonitoring_AppPatch_vX.Y.Z.zip`.
 - Keep release notes in `update_vX.Y.Z.json` synchronized with the final release description before uploading.
-- GitHub releases receive all generated upload artifacts. Gitee releases receive the update JSON, optional AppPatch, and launcher manifest, but not the full package zip.
+- Keep `launcher_manifest_vX.Y.Z.json` and `release_info_vX.Y.Z.txt` as local verification and handoff files; do not upload them to GitHub or Gitee by default.
+- Gitee releases receive the update JSON and optional AppPatch, but not the full package zip.
 - For Gitee, open the new-release page for the user and let the user complete the form and upload files manually; do not automate submission unless the user explicitly changes this workflow.
 - Do not update ExpressPackingMonitoring.Launcher unless necessary
 

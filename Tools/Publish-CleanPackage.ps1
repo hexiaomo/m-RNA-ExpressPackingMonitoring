@@ -750,11 +750,11 @@ $releaseInfoLines += (ConvertFrom-Utf8Base64 "54mI5pys77ya") + $releaseTag
 $releaseInfoLines += (ConvertFrom-Utf8Base64 "UmVsZWFzZSDpobXpnaLvvJo=") + $releasePage
 $releaseInfoLines += "Full download page: " + $fullDownloadPage
 $releaseInfoLines += ""
-$releaseInfoLines += ConvertFrom-Utf8Base64 "6ZyA6KaB5LiK5Lyg77ya"
+$releaseInfoLines += ConvertFrom-Utf8Base64 "6buY6K6k5LiK5Lyg77ya"
 $releaseInfoLines += (ConvertFrom-Utf8Base64 "MS4g5a6M5pW05YyFIHppcO+8mg==") + (Split-Path -Leaf $zipFullPath)
 $releaseInfoLines += (ConvertFrom-Utf8Base64 "QXBwUGF0Y2gg5YyF77ya") + $patchReleaseInfo
 $releaseInfoLines += (ConvertFrom-Utf8Base64 "My4g5pu05paw5o+P6L+w5paH5Lu277ya") + $updateJsonName
-$releaseInfoLines += "4. launcher manifest: " + $launcherManifestName
+$releaseInfoLines += "Local verification only (do not upload by default): " + $launcherManifestName
 $releaseInfoLines += ""
 $releaseInfoLines += $releaseInfoCheckLine
 $releaseInfoLines += ""

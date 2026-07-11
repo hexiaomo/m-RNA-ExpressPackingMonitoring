@@ -56,8 +56,8 @@
 - 完整包包含预生成的默认 Edge TTS 语音缓存，首次使用固定文案不需要现场生成
 - 增量包不包含 TTS 缓存，并验证补丁清单、`update_vX.Y.Z.json`、启动器清单、标签和程序版本号一致
 - `update_vX.Y.Z.json` 的更新内容与最终发布说明一致，合并发布时包含尚未正式发布版本的有效改动
-- GitHub 上传完整 zip、更新 JSON、可用的 AppPatch 和启动器清单
-- Gitee 上传更新 JSON、可用的 AppPatch 和启动器清单，不上传完整 zip；仅打开新建 Release 页面，由用户手动填写并上传
+- GitHub 上传完整 zip、更新 JSON 和可用的 AppPatch，默认不上传启动器清单和发布信息文件
+- Gitee 上传更新 JSON 和可用的 AppPatch，不上传完整 zip、启动器清单和发布信息文件；仅打开新建 Release 页面，由用户手动填写并上传
 - 使用发布包执行一次从旧版本升级，确认配置、数据库和录像保留，启动器可以正常进入应用
 
 完成以上实机检查后，打包时才可确认 `-ConfirmManualCoreChecks`。
