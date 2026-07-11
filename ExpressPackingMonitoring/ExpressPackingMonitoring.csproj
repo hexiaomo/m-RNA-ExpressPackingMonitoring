@@ -111,6 +111,7 @@
     <Compile Include="Services\WebServer.cs" />
     <Compile Include="Themes\ThemeManager.cs" />
     <Compile Include="ViewModels\MainViewModel.Cleanup.cs" />
+    <Compile Include="ViewModels\CameraLifecycleSynchronization.cs" />
     <Compile Include="ViewModels\MainViewModel.cs" />
     <Compile Include="ViewModels\MainViewModel.Encoder.cs" />
     <Compile Include="ViewModels\MainViewModel.Recording.cs" />

@@ -491,6 +491,14 @@ namespace ExpressPackingMonitoring.ViewModels
                     }
                 }
 
+                if (!await WaitForCameraFrameAsync(TimeSpan.FromSeconds(3)))
+                {
+                    RuntimeLog.Warn("Recording", "Camera is running but no valid frame arrived within 3 seconds");
+                    ShowToast("警告：摄像头唤醒后没有画面，未开始录制");
+                    SpeakWarning(DefaultSpeechCatalog.CameraNotReady);
+                    return;
+                }
+
                 bool startAudioAfterVideo = Config.EnableAudioRecording && HasConfiguredAudioDevice();
 
                 // 1. 彻底清理环境：如果系统残留了任何挂死的 ffmpeg，全部清掉

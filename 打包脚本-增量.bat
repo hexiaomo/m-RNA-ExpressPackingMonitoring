@@ -43,8 +43,13 @@ echo Baseline version: %BASELINE_VERSION%
 echo Baseline app:     %BASELINE_APP_DIR%
 echo.
 
+echo Before packaging, complete RELEASE_CHECKLIST.md.
+choice /C YN /N /M "Confirm all manual core business and recovery checks are complete? [Y/N]: "
+if errorlevel 2 exit /b 1
+
 pwsh -NoProfile -ExecutionPolicy Bypass -File "Tools\Publish-CleanPackage.ps1" ^
   %VERSION_ARG% ^
+  -ConfirmManualCoreChecks ^
   -PatchBaselineVersion %BASELINE_VERSION% ^
   -BaselineAppDir "%BASELINE_APP_DIR%" ^
   %LAUNCHER_MANIFEST_ARG%

@@ -9,6 +9,7 @@ param(
     [string]$BaselineLauncherManifestPath = "",
     [string]$PatchBaselineVersion = "0.0.18",
     [switch]$SkipTtsCacheGeneration,
+    [switch]$ConfirmManualCoreChecks,
     [switch]$DisablePatch
 )
 
@@ -17,7 +18,16 @@ $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $appProject = Join-Path $repoRoot "ExpressPackingMonitoring\ExpressPackingMonitoring.csproj"
 $launcherProject = Join-Path $repoRoot "ExpressPackingMonitoring.Launcher\ExpressPackingMonitoring.Launcher.csproj"
+$releaseValidationScript = Join-Path $repoRoot "Tools\Test-Release.ps1"
 $ttsCacheBuilderProject = Join-Path $repoRoot "Tools\ExpressPackingMonitoring.TtsCacheBuilder\ExpressPackingMonitoring.TtsCacheBuilder.csproj"
+
+function Invoke-CoreRegressionTests {
+    if (-not (Test-Path $releaseValidationScript)) {
+        throw "Release validation script not found: $releaseValidationScript"
+    }
+
+    & $releaseValidationScript -Configuration $Configuration
+}
 
 function Invoke-DotNetPublish {
     param([string[]]$Arguments)
@@ -140,6 +150,11 @@ if (-not $zipFullPath.StartsWith($repoFullPath, [System.StringComparison]::Ordin
 if ([string]::Equals($packageArtifactRoot, $outputFullPath, [System.StringComparison]::OrdinalIgnoreCase) -or
     $packageArtifactRoot.StartsWith(($outputFullPath.TrimEnd('\') + '\'), [System.StringComparison]::OrdinalIgnoreCase)) {
     throw "ZipPath must not be inside OutputDir, otherwise the package may include itself: $zipFullPath"
+}
+
+Invoke-CoreRegressionTests
+if (-not $ConfirmManualCoreChecks) {
+    throw "Manual core business and recovery checks are not confirmed. Complete RELEASE_CHECKLIST.md, then pass -ConfirmManualCoreChecks."
 }
 
 if (Test-Path $outputFullPath) {

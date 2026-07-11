@@ -7,7 +7,7 @@ namespace ExpressPackingMonitoring.Tests;
 public sealed class VideoDatabaseTests
 {
     [Fact]
-    public void GetRecentCompletedVideos_ReturnsLatestTenValidRecordsForDate()
+    public void GetRecentCompletedVideos_ReturnsLatestTwentyValidRecordsForDate()
     {
         string tempDirectory = Path.Combine(Path.GetTempPath(), $"ExpressPackingMonitoringTests-{Guid.NewGuid():N}");
         Directory.CreateDirectory(tempDirectory);

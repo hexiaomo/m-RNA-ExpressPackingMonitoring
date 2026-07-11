@@ -118,7 +118,8 @@ namespace ExpressPackingMonitoring.ViewModels
         private DateTime _lastCameraStateErrorLogAt = DateTime.MinValue;
         private DateTime _lastUiHeartbeatAt = DateTime.Now;
         private System.Windows.Threading.DispatcherTimer _uiHeartbeatTimer;
-        private int _previewUpdatePending;
+        private readonly PreviewSessionGate _previewSessionGate = new();
+        private readonly CameraFrameReadySignal _cameraFrameReady = new();
         private CancellationTokenSource _cts;
 
         // 摄像头空闲休眠
@@ -327,10 +328,7 @@ namespace ExpressPackingMonitoring.ViewModels
         public void ResumeVideoPreviewUpdatesAfterWindowMove()
         {
             SuppressVideoPreviewUpdates = false;
-            Interlocked.Exchange(ref _previewUpdatePending, 0);
-            _lastPreviewFrameAt = DateTime.UtcNow;
-            _lastPreviewPublishedAt = DateTime.Now;
-            _lastPreviewFreezeLogAt = DateTime.Now;
+            BeginPreviewSession(clearFrame: false);
         }
         private void RefreshBarcodes()
         {
@@ -546,7 +544,7 @@ namespace ExpressPackingMonitoring.ViewModels
 
             _lastUiHeartbeatAt = DateTime.Now;
             _uiHeartbeatTimer = new System.Windows.Threading.DispatcherTimer(
-                System.Windows.Threading.DispatcherPriority.Background,
+                System.Windows.Threading.DispatcherPriority.Normal,
                 dispatcher)
             {
                 Interval = TimeSpan.FromSeconds(1)
@@ -2166,6 +2164,7 @@ namespace ExpressPackingMonitoring.ViewModels
             {
                 IsCameraSleeping = false;
                 _consecutiveRestartFailures = 0;
+                RuntimeLog.Info("Camera", "Wake requested by user activity");
                 StartCamera();
                 ShowToast("摄像头已唤醒");
                 Debug.WriteLine("[Idle] 用户活跃，摄像头唤醒");
@@ -2212,6 +2211,49 @@ namespace ExpressPackingMonitoring.ViewModels
 
         private DateTime _lastFrameTime = DateTime.MinValue;
 
+        private int BeginPreviewSession(bool clearFrame)
+        {
+            int sessionId = _previewSessionGate.BeginSession();
+            _lastPreviewFrameAt = DateTime.MinValue;
+            _lastPreviewPublishedAt = DateTime.Now;
+            _lastPreviewFreezeLogAt = DateTime.Now;
+
+            if (clearFrame)
+            {
+                _cameraFrameReady.BeginSession();
+                var dispatcher = Application.Current?.Dispatcher;
+                void ClearPreview()
+                {
+                    if (!_previewSessionGate.IsCurrent(sessionId)) return;
+                    _previewWriteableBitmap = null;
+                    VideoFrame = null;
+                }
+
+                if (dispatcher == null || dispatcher.CheckAccess())
+                    ClearPreview();
+                else
+                    _ = dispatcher.BeginInvoke(new Action(ClearPreview));
+            }
+
+            return sessionId;
+        }
+
+        private void ReleasePreviewUpdate(int sessionId)
+        {
+            _previewSessionGate.Release(sessionId);
+        }
+
+        private async Task<bool> WaitForCameraFrameAsync(TimeSpan timeout)
+        {
+            if (_isDisposed || !await _cameraFrameReady.WaitAsync(timeout))
+                return false;
+
+            lock (_frameLock)
+            {
+                return _latestFrame != null && !_latestFrame.IsDisposed && !_latestFrame.Empty();
+            }
+        }
+
         private void StartCamera()
         {
             try
@@ -2227,6 +2269,8 @@ namespace ExpressPackingMonitoring.ViewModels
                     RuntimeLog.Warn("Camera", $"StartCamera skipped because previous source still exists, running={_videoSource.IsRunning}");
                     return;
                 }
+
+                int previewSessionId = BeginPreviewSession(clearFrame: true);
 
                 var videoDevices = new FilterInfoCollection(FilterCategory.VideoInputDevice);
                 if (videoDevices.Count == 0) 
@@ -2333,7 +2377,7 @@ namespace ExpressPackingMonitoring.ViewModels
                 _lastFrameTime = DateTime.Now; // 防止 VideoProcessLoop 启动时误判无帧
                 _lastPreviewPublishedAt = DateTime.Now;
                 _cameraEverConnected = true;
-                RuntimeLog.Info("Camera", $"StartCamera success {Config.FrameWidth}x{Config.FrameHeight}@{_actualCameraFps}, running={_videoSource.IsRunning}");
+                RuntimeLog.Info("Camera", $"StartCamera success {Config.FrameWidth}x{Config.FrameHeight}@{_actualCameraFps}, running={_videoSource.IsRunning}, previewSession={previewSessionId}");
             }
             catch (Exception ex)
             {
@@ -2382,11 +2426,12 @@ namespace ExpressPackingMonitoring.ViewModels
                 _cameraForceStopTask = null;
             }
             lock (_frameLock) { _latestFrame?.Dispose(); _latestFrame = null; }
+            BeginPreviewSession(clearFrame: true);
             RuntimeLog.Info("Camera", "StopCamera completed");
             return true;
         }
         
-        private void VideoSource_NewFrame(object sender, NewFrameEventArgs eventArgs) { try { Mat newMat = BitmapToMat(eventArgs.Frame); lock (_frameLock) { _latestFrame?.Dispose(); _latestFrame = newMat; } _lastFrameTime = DateTime.Now; } catch (Exception ex) { RuntimeLog.Error("Camera", "NewFrame conversion failed", ex); } }
+        private void VideoSource_NewFrame(object sender, NewFrameEventArgs eventArgs) { try { Mat newMat = BitmapToMat(eventArgs.Frame); lock (_frameLock) { _latestFrame?.Dispose(); _latestFrame = newMat; } _lastFrameTime = DateTime.Now; _cameraFrameReady.Signal(); } catch (Exception ex) { RuntimeLog.Error("Camera", "NewFrame conversion failed", ex); } }
 
         private Mat BitmapToMat(Bitmap bitmap)
         {
@@ -2802,7 +2847,7 @@ namespace ExpressPackingMonitoring.ViewModels
             if (now - _lastPreviewFreezeLogAt > PreviewFreezeWarnThreshold)
             {
                 _lastPreviewFreezeLogAt = now;
-                RuntimeLog.Warn("Preview", $"Preview stale for {sinceLastPreview.TotalSeconds:F1}s while frames are fresh ({sinceLastFrame.TotalSeconds:F1}s), pending={_previewUpdatePending}, recording={IsRecording}, queue={queueCount}, writeTask={writeTaskStatus}");
+                RuntimeLog.Warn("Preview", $"Preview stale for {sinceLastPreview.TotalSeconds:F1}s while frames are fresh ({sinceLastFrame.TotalSeconds:F1}s), pending={(_previewSessionGate.IsPending ? 1 : 0)}, recording={IsRecording}, queue={queueCount}, writeTask={writeTaskStatus}");
                 LogResourceHealthIfDue("preview-stale", force: true);
             }
 
@@ -2813,7 +2858,7 @@ namespace ExpressPackingMonitoring.ViewModels
             _lastPreviewWatchdogRestartAt = now;
             RuntimeLog.Warn("Preview", $"Preview frozen for {sinceLastPreview.TotalSeconds:F1}s, restarting camera. recording={IsRecording}, queue={queueCount}, writeTask={writeTaskStatus}");
             LogResourceHealthIfDue("preview-restart", force: true);
-            Interlocked.Exchange(ref _previewUpdatePending, 0);
+            _previewSessionGate.ClearCurrentPending();
             _ = Application.Current.Dispatcher.InvokeAsync(() =>
             {
                 if (_isDisposed || _isCameraSleeping || SuppressVideoPreviewUpdates) return;
@@ -2833,7 +2878,7 @@ namespace ExpressPackingMonitoring.ViewModels
             return !SuppressVideoPreviewUpdates
                 && !_isDisposed
                 && DateTime.UtcNow - _lastPreviewFrameAt >= PreviewFrameInterval
-                && Volatile.Read(ref _previewUpdatePending) == 0;
+                && !_previewSessionGate.IsPending;
         }
 
         private void PublishPreviewFrameIfDue(Mat frame)
@@ -2843,7 +2888,7 @@ namespace ExpressPackingMonitoring.ViewModels
             DateTime now = DateTime.UtcNow;
             if (now - _lastPreviewFrameAt < PreviewFrameInterval) return;
 
-            if (Interlocked.CompareExchange(ref _previewUpdatePending, 1, 0) != 0) return;
+            if (!_previewSessionGate.TryAcquire(out int previewSessionId)) return;
             _lastPreviewFrameAt = now;
 
             Mat previewFrame = null;
@@ -2855,7 +2900,7 @@ namespace ExpressPackingMonitoring.ViewModels
                 if (dispatcher == null)
                 {
                     previewFrame.Dispose();
-                    Interlocked.Exchange(ref _previewUpdatePending, 0);
+                    ReleasePreviewUpdate(previewSessionId);
                     return;
                 }
 
@@ -2865,7 +2910,9 @@ namespace ExpressPackingMonitoring.ViewModels
                 {
                     try
                     {
-                        if (!_isDisposed && !SuppressVideoPreviewUpdates)
+                        if (!_isDisposed
+                            && !SuppressVideoPreviewUpdates
+                            && _previewSessionGate.IsCurrent(previewSessionId))
                         {
                             if (_previewWriteableBitmap == null
                                 || _previewWriteableBitmap.PixelWidth != frameToPublish.Width
@@ -2894,14 +2941,14 @@ namespace ExpressPackingMonitoring.ViewModels
                     finally
                     {
                         frameToPublish.Dispose();
-                        Interlocked.Exchange(ref _previewUpdatePending, 0);
+                        ReleasePreviewUpdate(previewSessionId);
                     }
-                }), System.Windows.Threading.DispatcherPriority.Background);
+                }), System.Windows.Threading.DispatcherPriority.Render);
             }
             catch
             {
                 previewFrame?.Dispose();
-                Interlocked.Exchange(ref _previewUpdatePending, 0);
+                ReleasePreviewUpdate(previewSessionId);
                 if (DateTime.Now - _lastPreviewConvertErrorLogAt > TimeSpan.FromSeconds(30))
                 {
                     _lastPreviewConvertErrorLogAt = DateTime.Now;
@@ -2937,11 +2984,11 @@ namespace ExpressPackingMonitoring.ViewModels
                 long managedMb = GC.GetTotalMemory(false) / 1024 / 1024;
                 long workingSetMb = process.WorkingSet64 / 1024 / 1024;
                 long privateMb = process.PrivateMemorySize64 / 1024 / 1024;
-                return $"ws={workingSetMb}MB, private={privateMb}MB, managed={managedMb}MB, handles={process.HandleCount}, threads={process.Threads.Count}, gc0={GC.CollectionCount(0)}, gc1={GC.CollectionCount(1)}, gc2={GC.CollectionCount(2)}, frameAge={frameAge:F1}s, previewAge={previewAge:F1}s, uiAge={uiAge:F1}s, pending={_previewUpdatePending}, recording={IsRecording}, videoQueue={videoQueueCount}, audioQueue={audioQueueCount}";
+                return $"ws={workingSetMb}MB, private={privateMb}MB, managed={managedMb}MB, handles={process.HandleCount}, threads={process.Threads.Count}, gc0={GC.CollectionCount(0)}, gc1={GC.CollectionCount(1)}, gc2={GC.CollectionCount(2)}, frameAge={frameAge:F1}s, previewAge={previewAge:F1}s, uiAge={uiAge:F1}s, pending={(_previewSessionGate.IsPending ? 1 : 0)}, recording={IsRecording}, videoQueue={videoQueueCount}, audioQueue={audioQueueCount}";
             }
             catch (Exception ex)
             {
-                return $"health unavailable: {ex.Message}, frameAge={frameAge:F1}s, previewAge={previewAge:F1}s, uiAge={uiAge:F1}s, pending={_previewUpdatePending}, recording={IsRecording}, videoQueue={videoQueueCount}, audioQueue={audioQueueCount}";
+                return $"health unavailable: {ex.Message}, frameAge={frameAge:F1}s, previewAge={previewAge:F1}s, uiAge={uiAge:F1}s, pending={(_previewSessionGate.IsPending ? 1 : 0)}, recording={IsRecording}, videoQueue={videoQueueCount}, audioQueue={audioQueueCount}";
             }
         }
 

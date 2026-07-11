@@ -54,7 +54,9 @@ Use C# with nullable references and implicit usings enabled. Follow the existing
 
 ## Testing Guidelines
 
-There is no dedicated unit test project yet. At minimum, run `dotnet build ExpressPackingMonitoring.sln -c Debug` before committing. For recording, Web playback, TTS, packaging, or FFmpeg changes, also run the affected workflow manually and note what was verified. Use `Test/HTML/` pages when validating userscript parsing behavior.
+`ExpressPackingMonitoring.Tests/` contains the automated regression suite. At minimum, run `dotnet test ExpressPackingMonitoring.Tests/ExpressPackingMonitoring.Tests.csproj -c Debug` and `dotnet build ExpressPackingMonitoring.sln -c Debug` before committing. For recording, Web playback, TTS, packaging, or FFmpeg changes, also run the affected workflow manually and note what was verified. Use `Test/HTML/` pages when validating userscript parsing behavior.
+
+Before every release, run `pwsh -NoProfile -File Tools/Test-Release.ps1`. Packaging is blocked unless all required core business and recovery tests are present and passing and the manual scenarios in `RELEASE_CHECKLIST.md` have been completed. Do not confirm `-ConfirmManualCoreChecks` without performing those real-device checks.
 
 ## Commit & Pull Request Guidelines
 
