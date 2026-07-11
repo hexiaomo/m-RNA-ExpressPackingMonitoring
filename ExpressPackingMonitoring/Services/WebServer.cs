@@ -82,15 +82,13 @@ namespace ExpressPackingMonitoring.Services
         private static readonly string _transCacheDir = AppPaths.TranscodeCacheDir;
         private long _transCacheMaxBytes = 1024L * 1024 * 1024; // 默认 1GB，可config覆盖
 
-        // 订单信息缓存：Key 为快递单号(大写)，保留最近72小时的数据
+        // SQLite 是订单信息唯一持久化来源；此字典仅用于运行时快速查询。
         private readonly Dictionary<string, OrderInfo> _orderInfoCache = new();
         private readonly object _orderInfoLock = new();
         private readonly ConcurrentDictionary<string, PendingOrderLookup> _pendingOrderLookups = new();
         private readonly SemaphoreSlim _orderLookupSignal = new(0);
         private int _activeOrderLookupPolls;
         private long _lastOrderLookupPollUtcTicks;
-        private const int MaxOrderInfoEntries = 5000;
-        private static readonly string _orderInfoCachePath = AppPaths.OrderInfoCachePath;
 
         /// <summary>收到油猴脚本推送的订单信息时触发，参数为本次推送的所有订单</summary>
         public event Action<List<OrderInfo>> OrderInfoReceived;
@@ -135,7 +133,8 @@ namespace ExpressPackingMonitoring.Services
             Port = port;
             _transCacheMaxBytes = (long)transCacheMaxMB * 1024 * 1024;
             _listener = CreateListener(port);
-            LoadOrderInfoCache();
+            MigrateLegacyOrderInfoCache();
+            LoadOrderInfoCacheFromDatabase();
         }
 
         private static HttpListener CreateListener(int port)
@@ -556,12 +555,13 @@ namespace ExpressPackingMonitoring.Services
 
             lock (_orderInfoLock)
             {
-                // 超过上限时清理72小时前的旧数据
-                if (_orderInfoCache.Count > MaxOrderInfoEntries)
+                DateTime cutoff = DateTime.Now.Subtract(VideoDatabase.OrderInfoRetention);
+                foreach (string expiredKey in _orderInfoCache
+                    .Where(x => x.Value.PushTime < cutoff)
+                    .Select(x => x.Key)
+                    .ToList())
                 {
-                    var cutoff = DateTime.Now.AddHours(-72);
-                    var expiredKeys = _orderInfoCache.Where(kv => kv.Value.PushTime < cutoff).Select(kv => kv.Key).ToList();
-                    foreach (var k in expiredKeys) _orderInfoCache.Remove(k);
+                    _orderInfoCache.Remove(expiredKey);
                 }
 
                 foreach (var item in items)
@@ -582,12 +582,24 @@ namespace ExpressPackingMonitoring.Services
                     _orderInfoCache[key] = item;
                     count++;
                 }
+
+                if (_orderInfoCache.Count > VideoDatabase.MaxOrderInfoRecords)
+                {
+                    foreach (string overflowKey in _orderInfoCache
+                        .OrderByDescending(x => x.Value.PushTime)
+                        .Skip(VideoDatabase.MaxOrderInfoRecords)
+                        .Select(x => x.Key)
+                        .ToList())
+                    {
+                        _orderInfoCache.Remove(overflowKey);
+                    }
+                }
             }
 
             if (count > 0)
             {
-                SaveOrderInfoCache();
                 _db.UpsertOrderInfos(items);
+                _db.CleanupExpiredOrderInfos();
                 _db.UpdateRecentVideoOrderInfos(items);
             }
             return count;
@@ -774,54 +786,53 @@ namespace ExpressPackingMonitoring.Services
             }
         }
 
-        // ───── 订单信息缓存持久化 ─────
-        private void LoadOrderInfoCache()
+        // ───── 从唯一持久化来源 SQLite 恢复运行时缓存 ─────
+        private void MigrateLegacyOrderInfoCache()
+        {
+            string path = AppPaths.OrderInfoCachePath;
+            if (!File.Exists(path)) return;
+
+            try
+            {
+                string json = File.ReadAllText(path, Encoding.UTF8);
+                var items = JsonSerializer.Deserialize<List<OrderInfo>>(json, _jsonOptions) ?? new List<OrderInfo>();
+                DateTime cutoff = DateTime.Now.Subtract(VideoDatabase.OrderInfoRetention);
+                items = items
+                    .Where(x => x != null && !string.IsNullOrWhiteSpace(x.TrackingNumber) && x.PushTime >= cutoff)
+                    .ToList();
+                if (items.Count > 0)
+                    _db.UpsertOrderInfos(items);
+                _db.CleanupExpiredOrderInfos();
+
+                File.Delete(path);
+                Debug.WriteLine($"[WebServer] 已迁移并删除旧 JSON 订单缓存，共 {items.Count} 条");
+            }
+            catch (Exception ex)
+            {
+                // 迁移失败时保留旧文件，数据库仍可独立工作，避免启动失败或数据丢失。
+                Debug.WriteLine($"[WebServer] 迁移旧 JSON 订单缓存失败: {ex.Message}");
+            }
+        }
+
+        private void LoadOrderInfoCacheFromDatabase()
         {
             try
             {
-                if (!File.Exists(_orderInfoCachePath)) return;
-                string json = File.ReadAllText(_orderInfoCachePath);
-                var items = JsonSerializer.Deserialize<List<OrderInfo>>(json, _jsonOptions);
-                if (items == null) return;
-
-                var cutoff = DateTime.Now.AddHours(-72);
+                List<OrderInfo> items = _db.GetRecentOrderInfos();
                 lock (_orderInfoLock)
                 {
                     foreach (var item in items)
                     {
                         if (string.IsNullOrWhiteSpace(item.TrackingNumber)) continue;
-                        if (item.PushTime < cutoff) continue; // 跳过超过72小时的
                         string key = item.TrackingNumber.Trim().ToUpperInvariant();
                         _orderInfoCache[key] = item;
                     }
                 }
-                Debug.WriteLine($"[WebServer] 从磁盘恢复 {_orderInfoCache.Count} 条订单信息缓存");
+                Debug.WriteLine($"[WebServer] 从数据库恢复 {_orderInfoCache.Count} 条订单信息缓存");
             }
             catch (Exception ex)
             {
-                Debug.WriteLine($"[WebServer] 加载订单缓存失败: {ex.Message}");
-            }
-        }
-
-        private void SaveOrderInfoCache()
-        {
-            try
-            {
-                List<OrderInfo> snapshot;
-                var cutoff = DateTime.Now.AddHours(-72);
-                lock (_orderInfoLock)
-                {
-                    // 保存前清理超过72小时的过期数据
-                    var expiredKeys = _orderInfoCache.Where(kv => kv.Value.PushTime < cutoff).Select(kv => kv.Key).ToList();
-                    foreach (var k in expiredKeys) _orderInfoCache.Remove(k);
-                    snapshot = _orderInfoCache.Values.ToList();
-                }
-                string json = JsonSerializer.Serialize(snapshot, new JsonSerializerOptions { WriteIndented = false, PropertyNamingPolicy = JsonNamingPolicy.CamelCase, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping });
-                File.WriteAllText(_orderInfoCachePath, json);
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"[WebServer] 保存订单缓存失败: {ex.Message}");
+                Debug.WriteLine($"[WebServer] 从数据库加载订单缓存失败: {ex.Message}");
             }
         }
 

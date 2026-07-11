@@ -20,6 +20,10 @@ $requiredCoreTests = @(
     "ConfigurationAndScannerTests.AlertService_CriticalAlertBlocksNormalAlertUntilDisplayEnds",
     "ConfigurationAndScannerTests.AlertService_ForwardsIndustrialAlarmOnceAndRefundSpeechThreeTimes",
     "VideoDatabaseTests.GetRecentCompletedVideos_ReturnsLatestTwentyValidRecordsForDate",
+    "VideoDatabaseTests.OrderIdExistsRecent_ChecksThirtyDaysAndIgnoresDeletedOrExcludedRecords",
+    "VideoDatabaseTests.GetRecentOrderInfos_UsesDatabaseAsNinetyDaySourceOfTruth",
+    "VideoDatabaseTests.UpsertOrderInfos_DoesNotLetOlderSnapshotOverwriteNewerRefundState",
+    "VideoDatabaseTests.VideoRecords_DerivesFileNameFromPathAndDoesNotPersistRedundantColumn",
     "WebRequestLimitTests.ClipEditor_UsesSingleScreenSourcePlaybackWorkflow"
 )
 

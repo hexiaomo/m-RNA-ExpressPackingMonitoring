@@ -26,6 +26,7 @@ namespace ExpressPackingMonitoring.Config
         public static readonly string WebDebugLogPath = Path.Combine(LogDir, "web_debug.log");
         public static readonly string EncoderDetectLogPath = Path.Combine(LogDir, "encoder_detect.log");
         public static readonly string RuntimeLogPath = Path.Combine(LogDir, "runtime.log");
+        // 仅用于把旧版本 JSON 缓存一次性迁移到 SQLite；新版本不再写入此文件。
         public static readonly string OrderInfoCachePath = Path.Combine(CacheDir, "orderinfo_cache.json");
         public static readonly string UpdateCheckCachePath = Path.Combine(CacheDir, "update_check_cache.json");
 
@@ -142,8 +143,16 @@ namespace ExpressPackingMonitoring.Config
                     return 0;
 
                 EnsureVideoMergeColumns(connection, "legacy");
-                string sourceColumns = string.Join(", ", VideoMergeColumns.Select(c => $"s.{c}"));
-                string targetColumns = string.Join(", ", VideoMergeColumns);
+                var mergeColumns = VideoMergeColumns.ToList();
+                bool destinationNeedsLegacyFileName = GetTableColumns(connection, "main", "VideoRecords").Contains("FileName");
+                string sourceColumns = string.Join(", ", mergeColumns.Select(c => $"s.{c}"));
+                string targetColumns = string.Join(", ", mergeColumns);
+                if (destinationNeedsLegacyFileName)
+                {
+                    // 旧结构要求 FileName 非空；合并完成后 VideoDatabase 会删除此冗余列。
+                    targetColumns += ", FileName";
+                    sourceColumns += ", s.FilePath";
+                }
 
                 using var cmd = connection.CreateCommand();
                 cmd.CommandText = $@"
@@ -154,7 +163,6 @@ namespace ExpressPackingMonitoring.Config
                         SELECT 1
                         FROM main.VideoRecords d
                         WHERE d.FilePath = s.FilePath
-                           OR (d.FileName = s.FileName AND d.StartTime = s.StartTime)
                     );";
                 return cmd.ExecuteNonQuery();
             }
@@ -178,7 +186,6 @@ namespace ExpressPackingMonitoring.Config
             "VideoCodec",
             "VideoEncoder",
             "FilePath",
-            "FileName",
             "FileSizeBytes",
             "StartTime",
             "EndTime",

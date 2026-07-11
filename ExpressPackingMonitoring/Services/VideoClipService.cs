@@ -241,9 +241,7 @@ namespace ExpressPackingMonitoring.Services
             ValidateRange(startSeconds, endSeconds, duration);
 
             string taskId = Guid.NewGuid().ToString("N");
-            string sourceName = Path.GetFileNameWithoutExtension(record.FileName);
-            if (string.IsNullOrWhiteSpace(sourceName))
-                sourceName = Path.GetFileNameWithoutExtension(record.FilePath);
+            string sourceName = Path.GetFileNameWithoutExtension(record.FilePath);
             string outputName = SanitizeFileName($"{sourceName}_clip_{DateTime.Now:yyyyMMdd_HHmmss}.mp4");
             string outputPath = Path.Combine(AppPaths.ClipsDir, outputName);
 
@@ -460,7 +458,6 @@ namespace ExpressPackingMonitoring.Services
             {
                 _db.UpdateVideoFilePath(filePath, mp4Path);
                 record.FilePath = mp4Path;
-                record.FileName = Path.GetFileName(mp4Path);
                 return mp4Path;
             }
 
@@ -480,7 +477,6 @@ namespace ExpressPackingMonitoring.Services
 
             _db.UpdateVideoFilePath(filePath, candidate);
             record.FilePath = candidate;
-            record.FileName = Path.GetFileName(candidate);
             mp4Path = candidate;
             _log($"VideoClip: MKV 已转换，切换到 MP4 source={Path.GetFileName(candidate)}");
             return true;
