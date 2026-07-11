@@ -608,6 +608,70 @@
         throw new Error('打印后退款列表未在限定时间内完成刷新，已改用监控端最近缓存');
     }
 
+    async function queryOrdersByTrackingNumbers(trackingNumbers) {
+        const values = Array.from(new Set((trackingNumbers || []).map(value => String(value || '').trim().toUpperCase()).filter(Boolean)));
+        if (values.length === 0) return [];
+
+        const searchType = document.querySelector('select.extendSearchList');
+        const searchTypeItem = document.querySelector('.extendSearchListLi li[data-value="sid"]');
+        if (!searchType || !searchTypeItem) throw new Error('无法选择快递单号查询条件');
+
+        searchType.value = 'sid';
+        searchType.dispatchEvent(new Event('change', { bubbles: true }));
+        searchTypeItem.click();
+        await delay(150);
+
+        const input = document.querySelector('input.extendSearchSidInput');
+        const searchButton = document.querySelector('#printBatchSearchBtn[data-act-name="executeSearch"]');
+        if (!input || !searchButton) throw new Error('无法找到快递单号查询输入框或查询按钮');
+
+        input.value = values.join(',');
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+
+        let signature = getOrderListSignature();
+        let changed = false;
+        let stableSince = Date.now();
+        searchButton.click();
+        const deadline = Date.now() + PRINTED_REFUND_QUERY_TIMEOUT_MS;
+        while (Date.now() < deadline) {
+            await delay(100);
+            const nextSignature = getOrderListSignature();
+            if (nextSignature !== signature) {
+                signature = nextSignature;
+                changed = true;
+                stableSince = Date.now();
+            }
+            if (changed && Date.now() - stableSince >= PRINTED_REFUND_STABLE_MS)
+                return extractOrders();
+        }
+        throw new Error('按快递单号查询超时');
+    }
+
+    async function queryRequestedRefundSnapshot(trackingNumbers) {
+        const snapshot = await queryPrintedRefundSnapshot();
+        const requested = Array.from(new Set((trackingNumbers || []).map(value => String(value || '').trim().toUpperCase()).filter(Boolean)));
+        if (requested.length === 0) return snapshot;
+
+        const found = new Set(snapshot.map(order => String(order.trackingNumber || '').trim().toUpperCase()).filter(Boolean));
+        const missing = requested.filter(value => !found.has(value));
+        if (missing.length === 0) return snapshot;
+
+        try {
+            const exactOrders = await queryOrdersByTrackingNumbers(missing);
+            const merged = new Map();
+            exactOrders.forEach(order => merged.set(String(order.trackingNumber || '').trim().toUpperCase(), order));
+            snapshot.forEach(order => {
+                const key = String(order.trackingNumber || '').trim().toUpperCase();
+                if (!merged.has(key)) merged.set(key, order);
+            });
+            return Array.from(merged.values()).slice(0, 200);
+        } catch (error) {
+            console.warn('[打包监控] 历史订单精确查询失败，保留退款页快照:', error);
+            return snapshot;
+        }
+    }
+
     let orderLookupPollStarted = false;
     async function pollOrderLookupRequests() {
         let reconnectDelay = ORDER_LOOKUP_RECONNECT_MS;
@@ -624,7 +688,7 @@
                 let success = false;
                 let error = '';
                 try {
-                    orders = await queryPrintedRefundSnapshot();
+                    orders = await queryRequestedRefundSnapshot(pending.trackingNumbers || []);
                     success = true;
                 } catch (e) {
                     error = e?.message || String(e);

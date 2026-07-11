@@ -24,6 +24,8 @@ public sealed class ConfigurationAndScannerTests
         Assert.Contains("if (!IS_REFUND_WORKER) return;", script);
         Assert.Contains("普通页面只负责订单推送，不再领取退款请求或切换筛选", script);
         Assert.Contains("writeRefundWorkerHeartbeat();", script);
+        Assert.Contains("queryRequestedRefundSnapshot(pending.trackingNumbers || [])", script);
+        Assert.Contains("input.extendSearchSidInput", script);
     }
 
     [Fact]

@@ -49,6 +49,7 @@ namespace ExpressPackingMonitoring.Services
         private sealed class PendingOrderLookup
         {
             public string RequestId { get; init; } = "";
+            public IReadOnlyList<string> TrackingNumbers { get; init; } = Array.Empty<string>();
             public DateTime CreatedAtUtc { get; init; } = DateTime.UtcNow;
             public TaskCompletionSource<OrderLookupResult> Completion { get; } =
                 new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -668,7 +669,7 @@ namespace ExpressPackingMonitoring.Services
             }
         }
 
-        public async Task<OrderLookupResult> RequestFreshOrderSnapshotAsync(TimeSpan timeout)
+        public async Task<OrderLookupResult> RequestFreshOrderSnapshotAsync(TimeSpan timeout, IEnumerable<string> trackingNumbers = null)
         {
             if (!HasActiveOrderLookupClient)
                 return new OrderLookupResult { Responded = false };
@@ -676,7 +677,13 @@ namespace ExpressPackingMonitoring.Services
             CleanupExpiredOrderLookups();
             var pending = new PendingOrderLookup
             {
-                RequestId = Guid.NewGuid().ToString("N")
+                RequestId = Guid.NewGuid().ToString("N"),
+                TrackingNumbers = (trackingNumbers ?? Array.Empty<string>())
+                    .Where(x => !string.IsNullOrWhiteSpace(x))
+                    .Select(x => x.Trim().ToUpperInvariant())
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .Take(50)
+                    .ToArray()
             };
             _pendingOrderLookups[pending.RequestId] = pending;
             _orderLookupSignal.Release();
@@ -713,7 +720,8 @@ namespace ExpressPackingMonitoring.Services
                 SendJson(ctx, 200, new
                 {
                     pending = true,
-                    requestId = pending.RequestId
+                    requestId = pending.RequestId,
+                    trackingNumbers = pending.TrackingNumbers
                 });
             }
             finally

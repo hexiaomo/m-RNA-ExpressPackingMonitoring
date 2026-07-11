@@ -150,7 +150,7 @@ namespace ExpressPackingMonitoring.ViewModels
         }
 
         private static readonly TimeSpan PrintedRefundLookupInterval = TimeSpan.FromSeconds(5);
-        private static readonly TimeSpan PrintedRefundLookupTimeout = TimeSpan.FromSeconds(8);
+        private static readonly TimeSpan PrintedRefundLookupTimeout = TimeSpan.FromSeconds(15);
         private readonly object _printedRefundLookupLock = new();
         private readonly List<PrintedRefundScanCheck> _pendingPrintedRefundChecks = new();
         private Task _printedRefundLookupTask;
@@ -1011,7 +1011,17 @@ namespace ExpressPackingMonitoring.ViewModels
                 try
                 {
                     if (server != null)
-                        result = await server.RequestFreshOrderSnapshotAsync(PrintedRefundLookupTimeout);
+                    {
+                        string[] trackingNumbers;
+                        lock (_printedRefundLookupLock)
+                        {
+                            trackingNumbers = _pendingPrintedRefundChecks
+                                .Select(x => x.TrackingNumber)
+                                .Distinct(StringComparer.OrdinalIgnoreCase)
+                                .ToArray();
+                        }
+                        result = await server.RequestFreshOrderSnapshotAsync(PrintedRefundLookupTimeout, trackingNumbers);
+                    }
                 }
                 catch (Exception ex)
                 {
