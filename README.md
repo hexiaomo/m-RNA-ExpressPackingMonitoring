@@ -1,9 +1,11 @@
 # <img src="ExpressPackingMonitoring\app.ico" align="left" width="128" height="128"/> 快递打包监控
 
+简体中文 | [English](README.en.md)
+
 ![GitHub_Stars](https://img.shields.io/github/stars/m-RNA/ExpressPackingMonitoring?style=flat&color=ffcf49)
 [![GitHub All Releases](https://img.shields.io/github/downloads/m-RNA/ExpressPackingMonitoring/total)](https://github.com/m-RNA/ExpressPackingMonitoring/releases)
 
-一个给电商打包工位用的录像工具，扫码后自动录像，后面可以按快递单号查录像，方便核对和售后取证
+电商打包录像工具，扫码后自动录像，可按快递单号查录像，方便核对和售后取证
 
 ![软件截图](Image/软件截图.jpg)
 
