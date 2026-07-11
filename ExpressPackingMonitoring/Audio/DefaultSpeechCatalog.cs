@@ -12,22 +12,22 @@ namespace ExpressPackingMonitoring.Audio
         public const string SwitchToShipping = "切换发货";
         public const string SwitchToReturn = "切换退货";
         public const string CameraConnected = "摄像头已连接";
-        public const string MotionDetected = "检测到画面运动，重置超时";
+        public const string MotionDetected = "画面运动，重置超时";
         public const string TestOrderReceived = "收到测试订单";
 
         public const string MissingOrderNumber = "没有单号";
         public const string InvalidOrderNumber = "非法单号";
         public const string DuplicateOrderNumber = "重复单号";
-        public const string RecordingHasNoOrderNumber = "当前录像未绑定单号";
-        public const string OrderNumberMismatch = "单号不一致";
-        public const string VideoFileTooSmall = "视频文件太小，已删除";
+        public const string RecordingHasNoOrderNumber = "未绑定单号，不会停录";
+        public const string OrderNumberMismatch = "单号不一致，不会停录";
+        public const string VideoFileTooSmall = "视频过小，已删除";
         public const string RecordingTooShort = "录像过短，已丢弃";
         public const string CameraNotReady = "摄像头未就绪";
         public const string StoragePathNotWritable = "存储路径不可写";
         public const string AudioRecordingStartFailed = "音频录制启动失败";
         public const string RecordingFailed = "录制失败";
         public const string ReconnectCamera = "请重新连接摄像头";
-        public const string CameraDisconnected = "摄像头断开，正在尝试连接";
+        public const string CameraDisconnected = "摄像头断开，尝试连接中";
         public const string CameraNotDetected = "未检测到摄像头";
         public const string CameraReconnecting = "摄像头重新连接中";
         public const string MotionTimeoutWarning = "画面即将静止超时";
