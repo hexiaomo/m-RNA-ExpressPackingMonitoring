@@ -67,7 +67,10 @@
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="Button">
-                        <Border Background="{TemplateBinding Background}" CornerRadius="8">
+                        <Border Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="8">
                             <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
                         </Border>
                     </ControlTemplate>
@@ -229,6 +232,28 @@
                 <Border Grid.Row="1" Background="{DynamicResource VideoPlaceholder}" CornerRadius="10" ClipToBounds="True">
                     <Grid>
                         <Image x:Name="VideoImage" Source="{Binding VideoFrame}" Stretch="Uniform"/>
+                        <Border HorizontalAlignment="Left"
+                                VerticalAlignment="Top"
+                                Margin="16"
+                                Padding="12,7"
+                                CornerRadius="7"
+                                Background="#CC161A22">
+                            <Border.Style>
+                                <Style TargetType="Border">
+                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding IsRecording}" Value="True">
+                                            <Setter Property="Visibility" Value="Visible"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Border.Style>
+                            <StackPanel Orientation="Horizontal">
+                                <Ellipse Width="10" Height="10" Fill="{DynamicResource AccentRed}" Margin="0,0,8,0" VerticalAlignment="Center"/>
+                                <TextBlock Text="录制中" Foreground="White" FontSize="14" FontWeight="Bold" VerticalAlignment="Center"/>
+                                <TextBlock Text="{Binding RecordingElapsedText}" Foreground="#CCFFFFFF" FontSize="14" FontWeight="SemiBold" Margin="10,0,0,0" VerticalAlignment="Center"/>
+                            </StackPanel>
+                        </Border>
                         <Rectangle x:Name="ZoomPreviewBorder"
                                    HorizontalAlignment="Center"
                                    VerticalAlignment="Center"
@@ -289,22 +314,22 @@
                         </StackPanel>
 
                         <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
-                            <Button Style="{StaticResource ModernBtn}" Command="{Binding OpenStatsCommand}" Background="{DynamicResource AccentPurple}" Width="120" Height="42" Margin="0,0,10,0">
+                            <Button Style="{StaticResource ModernBtn}" Command="{Binding OpenStatsCommand}" Background="{DynamicResource ControlBackgroundHover}" BorderBrush="{DynamicResource BorderStrong}" BorderThickness="2" Width="120" Height="42" Margin="0,0,10,0">
                                 <StackPanel Orientation="Horizontal">
-                                    <Path Data="{StaticResource FluentDataIcon}" Width="18" Height="18" Stretch="Uniform" Fill="White" Margin="0,0,7,0"/>
-                                    <TextBlock Text="数据"/>
+                                    <Path Data="{StaticResource FluentDataIcon}" Width="18" Height="18" Stretch="Uniform" Fill="{DynamicResource AccentBlue}" Margin="0,0,7,0"/>
+                                    <TextBlock Text="数据" Foreground="{DynamicResource TextPrimary}"/>
                                 </StackPanel>
                             </Button>
-                            <Button Style="{StaticResource ModernBtn}" Command="{Binding OpenPlaybackCommand}" Background="{DynamicResource AccentCyan}" Width="120" Height="42" Margin="0,0,10,0">
+                            <Button Style="{StaticResource ModernBtn}" Command="{Binding OpenPlaybackCommand}" Background="{DynamicResource ControlBackgroundHover}" BorderBrush="{DynamicResource BorderStrong}" BorderThickness="2" Width="120" Height="42" Margin="0,0,10,0">
                                 <StackPanel Orientation="Horizontal">
-                                    <Path Data="{StaticResource FluentVideoIcon}" Width="18" Height="18" Stretch="Uniform" Fill="White" Margin="0,0,7,0"/>
-                                    <TextBlock Text="回放"/>
+                                    <Path Data="{StaticResource FluentVideoIcon}" Width="18" Height="18" Stretch="Uniform" Fill="{DynamicResource AccentBlue}" Margin="0,0,7,0"/>
+                                    <TextBlock Text="回放" Foreground="{DynamicResource TextPrimary}"/>
                                 </StackPanel>
                             </Button>
-                            <Button Style="{StaticResource ModernBtn}" Click="BtnSettings_Click" Background="{DynamicResource TextSecondary}" Width="120" Height="42">
+                            <Button Style="{StaticResource ModernBtn}" Click="BtnSettings_Click" Background="{DynamicResource ControlBackgroundHover}" BorderBrush="{DynamicResource BorderStrong}" BorderThickness="2" Width="120" Height="42">
                                 <StackPanel Orientation="Horizontal">
-                                    <Path Data="{StaticResource FluentSettingsIcon}" Width="18" Height="18" Stretch="Uniform" Fill="White" Margin="0,0,7,0"/>
-                                    <TextBlock Text="设置"/>
+                                    <Path Data="{StaticResource FluentSettingsIcon}" Width="18" Height="18" Stretch="Uniform" Fill="{DynamicResource TextSecondary}" Margin="0,0,7,0"/>
+                                    <TextBlock Text="设置" Foreground="{DynamicResource TextPrimary}"/>
                                 </StackPanel>
                             </Button>
                         </StackPanel>
@@ -353,7 +378,7 @@
                         <ListView.ItemTemplate>
                             <DataTemplate>
                                 <!-- 容器 Border -->
-                                <Border x:Name="ItemBorder" Background="{DynamicResource ControlBackground}" CornerRadius="6" Margin="2,2,2,6" Padding="10,8" ClipToBounds="True">
+                                <Border x:Name="ItemBorder" Background="{DynamicResource ControlBackground}" CornerRadius="6" Margin="2,1,2,4" Padding="9,7" ClipToBounds="True">
                                     
                                     <Grid>
                                         <!-- 1. 优化后的流光背景层：增加对比度，使用平移变换 -->
@@ -376,31 +401,18 @@
 
                                         <!-- 2. 内容层 (保持不变) -->
                                         <Grid>
-                                            <Grid.RowDefinitions>
-                                                <RowDefinition Height="Auto"/>
-                                                <RowDefinition Height="Auto"/>
-                                            </Grid.RowDefinitions>
-                                            
-                                            <Grid>
-                                                <Grid.ColumnDefinitions>
-                                                    <ColumnDefinition Width="Auto"/>
-                                                    <ColumnDefinition Width="*"/>
-                                                    <ColumnDefinition Width="Auto"/>
-                                                </Grid.ColumnDefinitions>
-                                                <TextBlock Grid.Column="0" Text="{Binding OrderId}" FontWeight="Bold" FontSize="14" Foreground="{DynamicResource TextPrimary}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
-                                                
-                                                <!-- 状态标签 -->
-                                                <Border Grid.Column="2" x:Name="BadgeBorder" CornerRadius="4" Padding="6,2" VerticalAlignment="Center" Background="{DynamicResource BadgePackBg}">
-                                                    <TextBlock x:Name="BadgeText" Text="{Binding Mode}" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource BadgePackText}"/>
-                                                </Border>
-                                            </Grid>
-                                            
-                                            <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,4,0,0">
-                                                <Path Data="{StaticResource FluentClockIcon}" Width="12" Height="12" Stretch="Uniform" Fill="{DynamicResource TextMuted}" Margin="0,0,4,0"/>
-                                                <TextBlock x:Name="DurationText" Text="{Binding Duration}" FontWeight="Bold" FontSize="12" Margin="0,0,12,0" Foreground="{DynamicResource TextSecondary}"/>
-                                                <Path Data="{StaticResource FluentCalendarIcon}" Width="12" Height="12" Stretch="Uniform" Fill="{DynamicResource TextMuted}" Margin="0,0,4,0"/>
-                                                <TextBlock Text="{Binding DateStr}" Foreground="{DynamicResource TextMuted}" FontSize="12"/>
-                                            </StackPanel>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Grid.Column="0" Text="{Binding OrderId}" FontWeight="Bold" FontSize="14" Foreground="{DynamicResource TextPrimary}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
+                                            <TextBlock Grid.Column="1" x:Name="DurationText" Text="{Binding Duration}" FontWeight="SemiBold" FontSize="12" Margin="10,0,10,0" Foreground="{DynamicResource TextSecondary}" VerticalAlignment="Center"/>
+                                            <TextBlock Grid.Column="2" Text="{Binding DateStr}" Foreground="{DynamicResource TextMuted}" FontSize="12" Margin="0,0,10,0" VerticalAlignment="Center"/>
+                                            <Border Grid.Column="3" x:Name="BadgeBorder" CornerRadius="4" Padding="6,2" VerticalAlignment="Center" Background="{DynamicResource BadgePackBg}">
+                                                <TextBlock x:Name="BadgeText" Text="{Binding Mode}" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource BadgePackText}"/>
+                                            </Border>
                                         </Grid>
                                     </Grid>
                                 </Border>

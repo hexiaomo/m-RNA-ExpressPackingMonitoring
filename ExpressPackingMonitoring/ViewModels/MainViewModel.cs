@@ -183,6 +183,7 @@ namespace ExpressPackingMonitoring.ViewModels
         private string _currentMode = "发货";
         private string _currentOrderId = "";
         private bool _isRecording;
+        private string _recordingElapsedText = "00:00";
         private string _scanInputText = "";
         public string ScanInputText { get => _scanInputText; set { if (SetProperty(ref _scanInputText, value)) ScheduleRefreshBarcodes(); } }
 
@@ -291,7 +292,17 @@ namespace ExpressPackingMonitoring.ViewModels
         public BitmapSource VideoFrame { get => _videoFrame; set => SetProperty(ref _videoFrame, value); }
         public string CurrentMode { get => _currentMode; set { if (SetProperty(ref _currentMode, value)) ScheduleRefreshBarcodes(); } }
         public string CurrentOrderId { get => _currentOrderId; set => SetProperty(ref _currentOrderId, value); }
-        public bool IsRecording { get => _isRecording; set { if (SetProperty(ref _isRecording, value)) ScheduleRefreshBarcodes(); } }
+        public bool IsRecording
+        {
+            get => _isRecording;
+            set
+            {
+                if (!SetProperty(ref _isRecording, value)) return;
+                if (!value) RecordingElapsedText = "00:00";
+                ScheduleRefreshBarcodes();
+            }
+        }
+        public string RecordingElapsedText { get => _recordingElapsedText; private set => SetProperty(ref _recordingElapsedText, value); }
         public bool IsShutdownInProgress { get => _isShutdownInProgress; private set => SetProperty(ref _isShutdownInProgress, value); }
         public double DiskUsagePercent { get => _diskUsagePercent; set => SetProperty(ref _diskUsagePercent, value); }
         public string DiskUsageText { get => _diskUsageText; set => SetProperty(ref _diskUsageText, value); }
@@ -1270,7 +1281,7 @@ namespace ExpressPackingMonitoring.ViewModels
             return false;
         }
 
-        public async void OpenSettings()
+        public void OpenSettings()
         {
             if (_isEncoderDetectRunning)
             {
@@ -1284,40 +1295,45 @@ namespace ExpressPackingMonitoring.ViewModels
                 var mainWindow = Application.Current?.MainWindow as MainWindow;
                 if (mainWindow != null) settingsWin.Owner = mainWindow;
                 mainWindow?.SuspendCapsLockForModalWindow();
-                bool settingsAccepted;
                 try
                 {
-                    settingsAccepted = settingsWin.ShowDialog() == true;
+                    settingsWin.ShowDialog();
                 }
                 finally
                 {
                     mainWindow?.ResumeCapsLockAfterModalWindow();
                 }
+            }
+            catch (Exception ex) { ShowToast($"设置错误: {ex.Message}"); }
+        }
 
-                if (settingsAccepted) {
+        public async Task<bool> ApplySettingsAsync(AppConfig nextConfig)
+        {
+            try
+            {
                     // 判断摄像头相关配置是否变更
-                    bool cameraChanged = Config.CameraIndex != clonedConfig.CameraIndex
-                        || Config.CameraMonikerString != clonedConfig.CameraMonikerString
-                        || Config.FrameWidth != clonedConfig.FrameWidth
-                        || Config.FrameHeight != clonedConfig.FrameHeight
-                        || Config.Fps != clonedConfig.Fps;
-                    bool themeChanged = Config.Theme != clonedConfig.Theme;
-                    bool globalKeyChanged = Config.EnableGlobalKeyboard != clonedConfig.EnableGlobalKeyboard;
-                    bool workstationChanged = !string.Equals(_activeWorkstationRole, clonedConfig.WorkstationRole, StringComparison.OrdinalIgnoreCase);
-                    bool aiTtsChanged = Config.EnableAiTts != clonedConfig.EnableAiTts
-                        || Config.AiTtsEngine != clonedConfig.AiTtsEngine;
-                    bool webServerChanged = Config.EnableWebServer != clonedConfig.EnableWebServer
-                        || Config.WebServerPort != clonedConfig.WebServerPort
-                        || Config.TranscodeCacheMaxMB != clonedConfig.TranscodeCacheMaxMB
-                        || Config.EnableOrderInfoLog != clonedConfig.EnableOrderInfoLog
-                        || Config.RequireWebAccessKey != clonedConfig.RequireWebAccessKey
-                        || !string.Equals(Config.WebAccessKey, clonedConfig.WebAccessKey, StringComparison.Ordinal);
-                    bool webServerNeedsRecovery = clonedConfig.EnableWebServer && _webServer == null;
+                    bool cameraChanged = Config.CameraIndex != nextConfig.CameraIndex
+                        || Config.CameraMonikerString != nextConfig.CameraMonikerString
+                        || Config.FrameWidth != nextConfig.FrameWidth
+                        || Config.FrameHeight != nextConfig.FrameHeight
+                        || Config.Fps != nextConfig.Fps;
+                    bool themeChanged = Config.Theme != nextConfig.Theme;
+                    bool globalKeyChanged = Config.EnableGlobalKeyboard != nextConfig.EnableGlobalKeyboard;
+                    bool workstationChanged = !string.Equals(_activeWorkstationRole, nextConfig.WorkstationRole, StringComparison.OrdinalIgnoreCase);
+                    bool aiTtsChanged = Config.EnableAiTts != nextConfig.EnableAiTts
+                        || Config.AiTtsEngine != nextConfig.AiTtsEngine;
+                    bool webServerChanged = Config.EnableWebServer != nextConfig.EnableWebServer
+                        || Config.WebServerPort != nextConfig.WebServerPort
+                        || Config.TranscodeCacheMaxMB != nextConfig.TranscodeCacheMaxMB
+                        || Config.EnableOrderInfoLog != nextConfig.EnableOrderInfoLog
+                        || Config.RequireWebAccessKey != nextConfig.RequireWebAccessKey
+                        || !string.Equals(Config.WebAccessKey, nextConfig.WebAccessKey, StringComparison.Ordinal);
+                    bool webServerNeedsRecovery = nextConfig.EnableWebServer && _webServer == null;
 
-                    AppConfig.NormalizeAfterLoad(clonedConfig);
-                    if (!SaveConfig(clonedConfig, notifyUser: true))
-                        return;
-                    Config = clonedConfig; 
+                    AppConfig.NormalizeAfterLoad(nextConfig);
+                    if (!SaveConfig(nextConfig, notifyUser: true))
+                        return false;
+                    Config = nextConfig;
 
                     // 同步语音服务配置
                     if (_speechService != null)
@@ -1387,9 +1403,13 @@ namespace ExpressPackingMonitoring.ViewModels
                         if (!webServerShouldApply || webServerApplied)
                             ShowToast(webServerShouldApply ? "配置已保存，局域网服务已应用" : "提示：配置已保存");
                     }
-                }
+                    return true;
             }
-            catch (Exception ex) { ShowToast($"设置错误: {ex.Message}"); }
+            catch (Exception ex)
+            {
+                ShowToast($"设置错误: {ex.Message}");
+                return false;
+            }
         }
 
         public void RunFirstUseSetupWizardIfNeeded(System.Windows.Window owner)
@@ -2765,6 +2785,7 @@ namespace ExpressPackingMonitoring.ViewModels
                                 {
                                     int maxSec = (int)(Config.MaxDurationMinutes * 60);
                                     _currentScanRecord.Duration = Config.EnableMaxDuration ? $"{(int)elapsedSec}s / {maxSec}s" : $"{(int)elapsedSec}s";
+                                    RecordingElapsedText = TimeSpan.FromSeconds(elapsedSec).ToString(elapsedSec >= 3600 ? @"hh\:mm\:ss" : @"mm\:ss");
                                 }
                             });
                         }

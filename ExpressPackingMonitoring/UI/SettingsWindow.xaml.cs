@@ -14,6 +14,7 @@ using System.Linq;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Threading;
+using System.Threading.Tasks;
 using System.IO;
 using System.Diagnostics;
 using System.Globalization;
@@ -22,6 +23,7 @@ using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using ExpressPackingMonitoring.Services;
 using NAudio.CoreAudioApi;
+using System.Text.Json;
 
 namespace ExpressPackingMonitoring.UI
 {
@@ -740,7 +742,21 @@ namespace ExpressPackingMonitoring.UI
             if (MoveStorageDownButton != null) MoveStorageDownButton.IsEnabled = hasSelection && selectedIndex >= 0 && selectedIndex < count - 1;
         }
 
-        private void BtnSave_Click(object sender, RoutedEventArgs e)
+        private async void BtnOk_Click(object sender, RoutedEventArgs e)
+        {
+            if (await SaveAndApplyAsync())
+            {
+                DialogResult = true;
+                Close();
+            }
+        }
+
+        private async void BtnApply_Click(object sender, RoutedEventArgs e)
+        {
+            await SaveAndApplyAsync();
+        }
+
+        private async Task<bool> SaveAndApplyAsync()
         {
             Keyboard.ClearFocus();
             SyncSelectedMicToConfig();
@@ -749,7 +765,7 @@ namespace ExpressPackingMonitoring.UI
             if (Config.EnableAudioRecording && string.IsNullOrEmpty(Config.AudioDeviceName))
             {
                 var mbr = MessageBox.Show("已开启录制声音，但未选择麦克风。录制可能会失败或没有声音。\n\n是否继续保存？", "音频提醒", MessageBoxButton.YesNo, MessageBoxImage.Question);
-                if (mbr == MessageBoxResult.No) return;
+                if (mbr == MessageBoxResult.No) return false;
             }
 
             // 1. 强制提交 DataGrid 中的未完成编辑
@@ -811,12 +827,15 @@ namespace ExpressPackingMonitoring.UI
             AppConfig.NormalizeAfterLoad(Config);
 
             if (!ValidateEncoderSelectionBeforeSave())
-                return;
+                return false;
 
             ApplyAutoStart(Config.AutoStartOnBoot);
             MainVM.PreviewZoomScale = null;
-            this.DialogResult = true;
-            this.Close();
+            var appliedConfig = JsonSerializer.Deserialize<AppConfig>(JsonSerializer.Serialize(Config)) ?? new AppConfig();
+            bool applied = await MainVM.ApplySettingsAsync(appliedConfig);
+            if (applied)
+                _originalTheme = Config.Theme;
+            return applied;
         }
 
         private async void RunSetupWizard_Click(object sender, RoutedEventArgs e)

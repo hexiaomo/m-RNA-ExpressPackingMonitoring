@@ -452,6 +452,21 @@
             <Setter Property="Foreground" Value="{DynamicResource TextPrimary}"/>
         </Style>
 
+        <Style x:Key="SettingsFooterPrimaryButtonStyle" TargetType="Button" BasedOn="{StaticResource PrimaryButtonStyle}">
+            <Setter Property="Height" Value="40"/>
+            <Setter Property="Background" Value="{DynamicResource AccentBlueDark}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource AccentBlueDark}"/>
+            <Setter Property="BorderThickness" Value="2"/>
+        </Style>
+
+        <Style x:Key="SettingsFooterSecondaryButtonStyle" TargetType="Button" BasedOn="{StaticResource BaseButtonStyle}">
+            <Setter Property="Height" Value="40"/>
+            <Setter Property="Background" Value="{DynamicResource ControlBackgroundHover}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource TextSecondary}"/>
+            <Setter Property="BorderThickness" Value="2"/>
+            <Setter Property="Foreground" Value="{DynamicResource TextPrimary}"/>
+        </Style>
+
         <Style x:Key="FieldLabelStyle" TargetType="TextBlock">
             <Setter Property="FontSize" Value="13"/>
             <Setter Property="FontWeight" Value="SemiBold"/>
@@ -764,20 +779,31 @@
                     <Setter Property="Template">
                         <Setter.Value>
                             <ControlTemplate TargetType="TabItem">
-                                <Border Background="{TemplateBinding Background}"
-                                        BorderThickness="{TemplateBinding BorderThickness}"
-                                        BorderBrush="{TemplateBinding BorderBrush}"
-                                        CornerRadius="8">
-                                    <ContentPresenter ContentSource="Header"
-                                                      HorizontalAlignment="Left"
-                                                      VerticalAlignment="Center"
-                                                      Margin="{TemplateBinding Padding}"/>
-                                </Border>
+                                <Grid>
+                                    <Border Background="{TemplateBinding Background}"
+                                            BorderThickness="{TemplateBinding BorderThickness}"
+                                            BorderBrush="{TemplateBinding BorderBrush}"
+                                            CornerRadius="8">
+                                        <ContentPresenter ContentSource="Header"
+                                                          HorizontalAlignment="Left"
+                                                          VerticalAlignment="Center"
+                                                          Margin="{TemplateBinding Padding}"/>
+                                    </Border>
+                                    <Border x:Name="SelectionIndicator"
+                                            Width="3"
+                                            Height="22"
+                                            HorizontalAlignment="Left"
+                                            VerticalAlignment="Center"
+                                            CornerRadius="0,3,3,0"
+                                            Background="{DynamicResource AccentBlue}"
+                                            Visibility="Collapsed"/>
+                                </Grid>
                                 <ControlTemplate.Triggers>
                                     <Trigger Property="IsSelected" Value="True">
                                         <Setter Property="Foreground" Value="{DynamicResource AccentBlue}"/>
                                         <Setter Property="Background" Value="{DynamicResource PanelBackground}"/>
                                         <Setter Property="BorderBrush" Value="{DynamicResource BorderLight}"/>
+                                        <Setter TargetName="SelectionIndicator" Property="Visibility" Value="Visible"/>
                                     </Trigger>
                                     <MultiTrigger>
                                         <MultiTrigger.Conditions>
@@ -1394,6 +1420,30 @@
                 <Border Background="Transparent" Padding="0,4,0,0">
                     <ScrollViewer VerticalScrollBarVisibility="Auto">
                         <StackPanel>
+                            <Border Style="{StaticResource SectionCardStyle}">
+                                <StackPanel>
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <ProgressBar Height="8"
+                                                     Minimum="0"
+                                                     Maximum="100"
+                                                     Value="{Binding CurrentDiskUsagePercent}"
+                                                     Foreground="{DynamicResource AccentBlue}"
+                                                     Background="{DynamicResource BorderStrong}"
+                                                     BorderThickness="0"
+                                                     VerticalAlignment="Center"/>
+                                        <TextBlock Grid.Column="1"
+                                                   Text="{Binding CurrentDiskUsageText}"
+                                                   Foreground="{DynamicResource TextPrimary}"
+                                                   FontWeight="SemiBold"
+                                                   VerticalAlignment="Center"
+                                                   Margin="16,0,0,0"/>
+                                    </Grid>
+                                </StackPanel>
+                            </Border>
                             <Border Style="{StaticResource SectionCardStyle}">
                                 <StackPanel>
                                     <Grid Style="{StaticResource SettingRowStyle}">
@@ -2705,36 +2755,14 @@
                 Padding="0,14,0,0">
             <Grid>
                 <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="Auto"/>
-                    <ColumnDefinition Width="220"/>
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
 
-                <TextBlock Grid.Column="0"
-                           Text="存储空间"
-                           Foreground="{DynamicResource TextSecondary}"
-                           VerticalAlignment="Center"
-                           FontWeight="SemiBold"
-                           Margin="0,0,12,0"/>
-                <ProgressBar Grid.Column="1"
-                             Height="8"
-                             Minimum="0"
-                             Maximum="100"
-                             Value="{Binding CurrentDiskUsagePercent}"
-                             Foreground="{DynamicResource AccentBlue}"
-                             Background="{DynamicResource BorderStrong}"
-                             BorderThickness="0"
-                             VerticalAlignment="Center"/>
-                <TextBlock Grid.Column="2"
-                           Text="{Binding CurrentDiskUsageText}"
-                           Foreground="{DynamicResource TextPrimary}"
-                           VerticalAlignment="Center"
-                           Margin="12,0,0,0"/>
-
-                <UniformGrid Grid.Column="3" Rows="1" Columns="2" Width="220">
-                    <Button Content="取消" Margin="0,0,10,0" Click="BtnCancel_Click" Style="{StaticResource SecondaryButtonStyle}"/>
-                    <Button Content="保存应用" Click="BtnSave_Click" Style="{StaticResource PrimaryButtonStyle}"/>
+                <UniformGrid Grid.Column="1" Rows="1" Columns="3" Width="330">
+                    <Button Content="确定" Margin="0,0,10,0" Click="BtnOk_Click" Style="{StaticResource SettingsFooterPrimaryButtonStyle}"/>
+                    <Button Content="应用" Margin="0,0,10,0" Click="BtnApply_Click" Style="{StaticResource SettingsFooterSecondaryButtonStyle}"/>
+                    <Button Content="取消" Click="BtnCancel_Click" Style="{StaticResource SettingsFooterSecondaryButtonStyle}"/>
                 </UniformGrid>
             </Grid>
         </Border>
