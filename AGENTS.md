@@ -16,12 +16,14 @@ dotnet restore ExpressPackingMonitoring.sln
 dotnet build ExpressPackingMonitoring.sln -c Debug
 dotnet run --project ExpressPackingMonitoring
 pwsh -NoProfile -File Tools\Publish-CleanPackage.ps1
+pwsh -NoProfile -File Tools\Test-Release-Automated.ps1
 ```
 
 - `restore` downloads NuGet dependencies.
 - `build` verifies the WPF app and launcher compile.
 - `run` starts the main app locally.
 - `Tools\Publish-CleanPackage.ps1` produces the clean release layout with the root launcher and `app\` payload.
+- `Tools\Test-Release-Automated.ps1` runs the isolated WPF smoke test, userscript concurrency/routing tests, and headless Web UI acceptance suite.
 
 ## Runtime and Distribution Notes
 
@@ -61,7 +63,7 @@ Use C# with nullable references and implicit usings enabled. Follow the existing
 
 `ExpressPackingMonitoring.Tests/` contains the automated regression suite. At minimum, run `dotnet test ExpressPackingMonitoring.Tests/ExpressPackingMonitoring.Tests.csproj -c Debug` and `dotnet build ExpressPackingMonitoring.sln -c Debug` before committing. For recording, Web playback, TTS, packaging, or FFmpeg changes, also run the affected workflow manually and note what was verified. Use `Test/HTML/` pages when validating userscript parsing behavior.
 
-Before every release, run `pwsh -NoProfile -File Tools/Test-Release.ps1`. Packaging is blocked unless all required core business and recovery tests are present and passing and the manual scenarios in `RELEASE_CHECKLIST.md` have been completed. Do not confirm `-ConfirmManualCoreChecks` without performing those real-device checks.
+Before every release, run `pwsh -NoProfile -File Tools/Test-Release-Automated.ps1`. Packaging is blocked unless all automated checks pass and the remaining real-device scenarios in `RELEASE_CHECKLIST.md` have been completed. Do not confirm `-ConfirmManualCoreChecks` without performing those real-device checks.
 
 ## Commit & Pull Request Guidelines
 

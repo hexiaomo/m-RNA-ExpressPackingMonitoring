@@ -63,7 +63,8 @@ internal static class PrintToolInstallGuide
         if (markerIndex < 0) return script;
         int lineEnd = script.IndexOf('\n', markerIndex);
         if (lineEnd < 0) return script + Environment.NewLine + directive;
-        return script.Insert(lineEnd + 1, directive + "\n");
+        string newline = script.Contains("\r\n", StringComparison.Ordinal) ? "\r\n" : "\n";
+        return script.Insert(lineEnd + 1, directive + newline);
     }
 
     private static string Render(string monitorAddress, string scriptLink)

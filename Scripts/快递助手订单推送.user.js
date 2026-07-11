@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         订单备注播报插件
 // @namespace    https://github.com/ExpressPackingMonitoring
-// @version      2.1
+// @version      2.2
 // @description  从快递助手批量打印页面提取订单备注和打印后退款状态，发送到监控工位，打包时自动播报或报警。
 // @author       ExpressPackingMonitoring
 // @icon         https://raw.githubusercontent.com/m-RNA/ExpressPackingMonitoring/main/ExpressPackingMonitoring/app.ico
@@ -44,7 +44,7 @@
     const REFUND_WORKER_OPEN_COOLDOWN_MS = 10 * 60 * 1000;
     const IS_REFUND_WORKER = new URL(location.href).searchParams.get(REFUND_WORKER_PARAM) === '1';
     const REFUND_WORKER_TOKEN = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    const CHANGELOG = 'v2.1：退款核验工作页增加唯一租约，自动关闭并发产生的重复页面';
+    const CHANGELOG = 'v2.2：防止退款核验页重复打开，并避免多监控端环境自动串台';
     const DEBUG_LOG = false;
 
     let lastUserActivityAt = Date.now();
@@ -234,6 +234,11 @@
 
         return DEFAULT_ADDRESS;
     }
+    function hasSavedMonitorAddress() {
+        return Boolean(String(GM_getValue('monitor_address', '')).trim() ||
+            String(GM_getValue('monitor_host', '')).trim() ||
+            String(GM_getValue('monitor_port', '')).trim());
+    }
     function getMonitorAddress() {
         return normalizeAddress(getMonitorAddressText(), DEFAULT_PORT);
     }
@@ -312,12 +317,12 @@
 
     async function findMonitorAddress(showProgress) {
         const saved = getMonitorAddress();
+        const hasSaved = hasSavedMonitorAddress();
         const port = saved.port;
-        const directCandidates = [
-            saved.host,
-            '127.0.0.1',
-            'localhost'
-        ].filter((host, index, arr) => host && arr.indexOf(host) === index);
+        const directCandidates = (hasSaved && !showProgress
+            ? [saved.host]
+            : [saved.host, '127.0.0.1', 'localhost'])
+            .filter((host, index, arr) => host && arr.indexOf(host) === index);
 
         for (const host of directCandidates) {
             if (showProgress) showNotification(`正在探测 ${host}:${port}`);
@@ -326,6 +331,10 @@
                 return `${found.host}:${found.port}`;
             }
         }
+
+        // 已绑定的监控端离线时不自动改绑，避免多监控端局域网串台。
+        // 用户仍可通过油猴菜单的“自动探测上位机地址”显式改绑。
+        if (hasSaved && !showProgress) return '';
 
         const prefixes = new Set();
         const savedPrefix = getHostPrefix(saved.host);

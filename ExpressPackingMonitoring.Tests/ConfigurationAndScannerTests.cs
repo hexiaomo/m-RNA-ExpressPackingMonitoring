@@ -46,6 +46,16 @@ public sealed class ConfigurationAndScannerTests
         Assert.Equal(customized, repeated);
     }
 
+    [Fact]
+    public void AddMonitorConnectPermission_PreservesCrLfLineEndings()
+    {
+        const string script = "// ==UserScript==\r\n// @connect      localhost\r\n// @connect      *\r\n// ==/UserScript==\r\n";
+
+        string customized = PrintToolInstallGuide.AddMonitorConnectPermission(script, "192.168.2.239:5280");
+
+        Assert.DoesNotContain("\n", customized.Replace("\r\n", "", StringComparison.Ordinal));
+    }
+
 
     [Fact]
     public void NormalizeAfterLoad_ResolvesConflictingScannerModesAndBounds()

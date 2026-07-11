@@ -152,8 +152,14 @@ public sealed class WorkstationInstanceCoordinator : IDisposable
         try { _cts.Dispose(); } catch { }
     }
 
-    private static string GetMutexName(string role) => $@"Local\{NamePrefix}.{NormalizeRole(role)}.Mutex";
-    private static string GetPipeName(string role) => $"{NamePrefix}.{NormalizeRole(role)}.Activate";
+    private static string GetMutexName(string role) => $@"Local\{GetScopedNamePrefix()}.{NormalizeRole(role)}.Mutex";
+    private static string GetPipeName(string role) => $"{GetScopedNamePrefix()}.{NormalizeRole(role)}.Activate";
+    private static string GetScopedNamePrefix()
+    {
+        string scope = Environment.GetEnvironmentVariable("EPM_INSTANCE_SCOPE") ?? "";
+        string normalizedScope = new(scope.Where(char.IsLetterOrDigit).Take(48).ToArray());
+        return string.IsNullOrEmpty(normalizedScope) ? NamePrefix : $"{NamePrefix}.{normalizedScope}";
+    }
     private static string NormalizeRole(string role) =>
         string.Equals(role, WorkstationRoles.PrintStation, StringComparison.OrdinalIgnoreCase)
             ? WorkstationRoles.PrintStation

@@ -19,6 +19,7 @@ $requiredCoreTests = @(
     "ConfigurationAndScannerTests.GetPrintedRefundLookupDelay_RequestsImmediatelyThenThrottlesForFiveSeconds",
     "ConfigurationAndScannerTests.RefundWorkerUserscript_IsolatesLookupFromUserPage",
     "ConfigurationAndScannerTests.AddMonitorConnectPermission_AddsExactHostWithoutDuplicatingWildcardPermission",
+    "ConfigurationAndScannerTests.AddMonitorConnectPermission_PreservesCrLfLineEndings",
     "ConfigurationAndScannerTests.AlertService_CriticalAlertBlocksNormalAlertUntilDisplayEnds",
     "ConfigurationAndScannerTests.AlertService_ForwardsIndustrialAlarmOnceAndRefundSpeechThreeTimes",
     "VideoDatabaseTests.GetRecentCompletedVideos_ReturnsLatestTwentyValidRecordsForDate",

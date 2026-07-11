@@ -51,6 +51,10 @@ namespace ExpressPackingMonitoring.Config
 
         private static string GetLocalAppDataRoot()
         {
+            string overridePath = Environment.GetEnvironmentVariable("EPM_USER_DATA_DIR");
+            if (!string.IsNullOrWhiteSpace(overridePath))
+                return Path.GetFullPath(overridePath);
+
             string localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
             return string.IsNullOrWhiteSpace(localAppData)
                 ? AppDomain.CurrentDomain.BaseDirectory

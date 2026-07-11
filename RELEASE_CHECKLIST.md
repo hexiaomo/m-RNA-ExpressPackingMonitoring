@@ -4,7 +4,8 @@
 
 ## 自动化门禁
 
-- 运行 `pwsh -NoProfile -File Tools/Test-Release.ps1`
+- 运行 `pwsh -NoProfile -File Tools/Test-Release-Automated.ps1`
+- 确认隔离 WPF 启停、userscript 并发/延时/多监控端和 Web 播放/剪辑界面自动验收全部通过
 - 确认必需的核心测试均存在，没有被删除或改名绕过
 - 确认 Release 全量测试全部通过
 - 确认 Web JavaScript 语法检查通过

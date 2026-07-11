@@ -122,7 +122,8 @@ namespace ExpressPackingMonitoring.Services
             Func<VideoRecord, MkvConversionResult> mkvConverter = null,
             Func<string> currentRecordingFileProvider = null,
             bool requireAccessKey = false,
-            string accessKey = null)
+            string accessKey = null,
+            string listenerHost = "+")
         {
             _db = db ?? throw new ArgumentNullException(nameof(db));
             _isRecordingProvider = isRecordingProvider ?? (() => false);
@@ -133,15 +134,18 @@ namespace ExpressPackingMonitoring.Services
             _clipService = new VideoClipService(_db, WriteLog, _mkvConverter, IsCurrentRecordingFile, () => Task.Run(CleanWebCache));
             Port = port;
             _transCacheMaxBytes = (long)transCacheMaxMB * 1024 * 1024;
-            _listener = CreateListener(port);
+            _listener = CreateListener(port, listenerHost);
             MigrateLegacyOrderInfoCache();
             LoadOrderInfoCacheFromDatabase();
         }
 
-        private static HttpListener CreateListener(int port)
+        private static HttpListener CreateListener(int port, string listenerHost)
         {
+            string host = string.Equals(listenerHost, "127.0.0.1", StringComparison.Ordinal)
+                ? listenerHost
+                : "+";
             var listener = new HttpListener();
-            listener.Prefixes.Add($"http://+:{port}/");
+            listener.Prefixes.Add($"http://{host}:{port}/");
             return listener;
         }
 
@@ -166,7 +170,7 @@ namespace ExpressPackingMonitoring.Services
                 // 只有用户明确保存局域网设置时，才请求管理员权限并重试
                 RegisterUrlAcl(Port);
                 try { _listener.Close(); } catch { }
-                _listener = CreateListener(Port);
+                _listener = CreateListener(Port, "+");
                 try
                 {
                     _listener.Start();
