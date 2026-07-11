@@ -12,7 +12,7 @@ internal static class PrintToolInstallGuide
 
     public static string CreateLocalGuide(string monitorAddress)
     {
-        string guideDir = Path.Combine(AppPaths.LogDir, "guide");
+        string guideDir = AppPaths.GuideCacheDir;
         Directory.CreateDirectory(guideDir);
         string guidePath = Path.Combine(guideDir, TemplateFileName);
         string scriptPath = ResolveUserscriptPath();

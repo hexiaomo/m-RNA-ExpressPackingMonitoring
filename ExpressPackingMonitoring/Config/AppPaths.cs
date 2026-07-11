@@ -19,6 +19,7 @@ namespace ExpressPackingMonitoring.Config
         public static readonly string ClipsDir = Path.Combine(CacheDir, "clips");
         public static readonly string TranscodeCacheDir = Path.Combine(CacheDir, "transcode");
         public static readonly string TtsCacheDir = Path.Combine(CacheDir, "tts");
+        public static readonly string GuideCacheDir = Path.Combine(CacheDir, "guide");
 
         public static readonly string ConfigPath = Path.Combine(UserDataDir, "config.json");
         public static readonly string VideoDatabasePath = Path.Combine(UserDataDir, "videos.db");
@@ -44,6 +45,7 @@ namespace ExpressPackingMonitoring.Config
             Directory.CreateDirectory(ClipsDir);
             Directory.CreateDirectory(TranscodeCacheDir);
             Directory.CreateDirectory(TtsCacheDir);
+            Directory.CreateDirectory(GuideCacheDir);
         }
 
         private static string GetLocalAppDataRoot()
@@ -75,6 +77,8 @@ namespace ExpressPackingMonitoring.Config
 
         private static void MigrateLegacyRuntimeData()
         {
+            MoveDirectoryContents(Path.Combine(LogDir, "guide"), GuideCacheDir);
+
             foreach (string legacyRoot in GetLegacyRuntimeRoots())
             {
                 MoveFileIfDestinationMissing(Path.Combine(legacyRoot, "config.json"), ConfigPath);
