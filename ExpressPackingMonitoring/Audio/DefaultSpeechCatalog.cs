@@ -9,8 +9,8 @@ namespace ExpressPackingMonitoring.Audio
     {
         public const string StartRecording = "开始录制";
         public const string StopRecording = "停止录制";
-        public const string SwitchToShipping = "切换发货";
-        public const string SwitchToReturn = "切换退货";
+        public const string SwitchToShipping = "发货模式";
+        public const string SwitchToReturn = "退货模式";
         public const string CameraConnected = "摄像头已连接";
         public const string MotionDetected = "画面运动，重置超时";
         public const string TestOrderReceived = "收到测试订单";
