@@ -1281,7 +1281,7 @@ namespace ExpressPackingMonitoring.UI
                 return;
             }
 
-            BtnMigrateMkv.Content = "取消迁移";
+            BtnMigrateMkv.Content = "取消合并";
             MigrationProgress.Visibility = Visibility.Visible;
             MigrationStatusText.Text = "正在扫描 MKV 记录...";
 
@@ -1295,17 +1295,17 @@ namespace ExpressPackingMonitoring.UI
             {
                 var (success, fail, skip) = await MainVM.BatchConvertMkvToMp4Async(progress, migrationCts.Token);
                 if (!_isClosing)
-                    MigrationStatusText.Text = $"迁移完成：成功 {success}，失败 {fail}，跳过 {skip}";
+                    MigrationStatusText.Text = $"合并完成：成功 {success}，失败 {fail}，跳过 {skip}";
             }
             catch (OperationCanceledException)
             {
                 if (!_isClosing)
-                    MigrationStatusText.Text = "迁移已取消";
+                    MigrationStatusText.Text = "合并已取消";
             }
             catch (Exception ex)
             {
                 if (!_isClosing)
-                    MigrationStatusText.Text = $"迁移出错：{ex.Message}";
+                    MigrationStatusText.Text = $"合并出错：{ex.Message}";
             }
             finally
             {
@@ -1313,7 +1313,7 @@ namespace ExpressPackingMonitoring.UI
                 migrationCts.Dispose();
                 if (!_isClosing)
                 {
-                    BtnMigrateMkv.Content = "开始迁移";
+                    BtnMigrateMkv.Content = "开始合并";
                     MigrationProgress.Visibility = Visibility.Collapsed;
                 }
             }
