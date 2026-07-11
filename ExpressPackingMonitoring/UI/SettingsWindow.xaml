@@ -270,7 +270,7 @@
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*"/>
                         <ColumnDefinition x:Name="UnitColumn" Width="Auto"/>
-                        <ColumnDefinition x:Name="SpinnerColumn" Width="28"/>
+                        <ColumnDefinition x:Name="SpinnerColumn" Width="0"/>
                     </Grid.ColumnDefinitions>
                     <TextBox x:Name="PART_TextBox"
                              Background="Transparent"
@@ -292,6 +292,7 @@
                                IsHitTestVisible="False"/>
                     <Border x:Name="SpinnerHost"
                             Grid.Column="2"
+                            Visibility="Collapsed"
                             Background="{DynamicResource ControlBackground}"
                             BorderBrush="{DynamicResource BorderLight}"
                             BorderThickness="1,0,0,0"
@@ -304,7 +305,7 @@
                                             Background="Transparent"
                                             Foreground="{DynamicResource TextSecondary}"
                                             AllowSpin="{TemplateBinding AllowSpin}"
-                                            ShowButtonSpinner="{TemplateBinding ShowButtonSpinner}"/>
+                                            ShowSpinner="False"/>
                     </Border>
                 </Grid>
             </Border>
@@ -317,10 +318,6 @@
                 </Trigger>
                 <Trigger Property="IsEnabled" Value="False">
                     <Setter Property="Opacity" Value="0.62"/>
-                </Trigger>
-                <Trigger Property="ShowButtonSpinner" Value="False">
-                    <Setter TargetName="SpinnerColumn" Property="Width" Value="0"/>
-                    <Setter TargetName="SpinnerHost" Property="Visibility" Value="Collapsed"/>
                 </Trigger>
                 <Trigger Property="Tag" Value="{x:Null}">
                     <Setter TargetName="UnitColumn" Property="Width" Value="0"/>
@@ -339,7 +336,7 @@
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*"/>
                         <ColumnDefinition x:Name="UnitColumn" Width="Auto"/>
-                        <ColumnDefinition x:Name="SpinnerColumn" Width="28"/>
+                        <ColumnDefinition x:Name="SpinnerColumn" Width="0"/>
                     </Grid.ColumnDefinitions>
                     <TextBox x:Name="PART_TextBox"
                              Background="Transparent"
@@ -361,6 +358,7 @@
                                IsHitTestVisible="False"/>
                     <Border x:Name="SpinnerHost"
                             Grid.Column="2"
+                            Visibility="Collapsed"
                             Background="{DynamicResource ControlBackground}"
                             BorderBrush="{DynamicResource BorderLight}"
                             BorderThickness="1,0,0,0"
@@ -373,7 +371,7 @@
                                             Background="Transparent"
                                             Foreground="{DynamicResource TextSecondary}"
                                             AllowSpin="{TemplateBinding AllowSpin}"
-                                            ShowButtonSpinner="{TemplateBinding ShowButtonSpinner}"/>
+                                            ShowSpinner="False"/>
                     </Border>
                 </Grid>
             </Border>
@@ -386,10 +384,6 @@
                 </Trigger>
                 <Trigger Property="IsEnabled" Value="False">
                     <Setter Property="Opacity" Value="0.62"/>
-                </Trigger>
-                <Trigger Property="ShowButtonSpinner" Value="False">
-                    <Setter TargetName="SpinnerColumn" Property="Width" Value="0"/>
-                    <Setter TargetName="SpinnerHost" Property="Visibility" Value="Collapsed"/>
                 </Trigger>
                 <Trigger Property="Tag" Value="{x:Null}">
                     <Setter TargetName="UnitColumn" Property="Width" Value="0"/>
@@ -410,7 +404,6 @@
             <Setter Property="Background" Value="{DynamicResource ControlBackground}"/>
             <Setter Property="BorderBrush" Value="{DynamicResource BorderStrong}"/>
             <Setter Property="BorderThickness" Value="1"/>
-            <Setter Property="ShowButtonSpinner" Value="False"/>
             <Setter Property="Template" Value="{StaticResource SettingsIntegerUpDownTemplate}"/>
         </Style>
 
@@ -426,7 +419,6 @@
             <Setter Property="Background" Value="{DynamicResource ControlBackground}"/>
             <Setter Property="BorderBrush" Value="{DynamicResource BorderStrong}"/>
             <Setter Property="BorderThickness" Value="1"/>
-            <Setter Property="ShowButtonSpinner" Value="False"/>
             <Setter Property="Template" Value="{StaticResource SettingsDoubleUpDownTemplate}"/>
         </Style>
 
