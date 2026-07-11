@@ -10,6 +10,20 @@ namespace ExpressPackingMonitoring.Tests;
 public sealed class ConfigurationAndScannerTests
 {
     [Fact]
+    public void RefundWorkerUserscript_IsolatesLookupFromUserPage()
+    {
+        string scriptPath = Path.Combine(AppContext.BaseDirectory, "Scripts", "快递助手订单推送.user.js");
+        string script = File.ReadAllText(scriptPath);
+
+        Assert.Contains("// @grant        GM_openInTab", script);
+        Assert.Contains("const IS_REFUND_WORKER", script);
+        Assert.Contains("GM_openInTab(buildRefundWorkerUrl(), { active: false", script);
+        Assert.Contains("if (!IS_REFUND_WORKER) return;", script);
+        Assert.Contains("普通页面只负责订单推送，不再领取退款请求或切换筛选", script);
+        Assert.Contains("writeRefundWorkerHeartbeat();", script);
+    }
+
+    [Fact]
     public void NormalizeAfterLoad_ResolvesConflictingScannerModesAndBounds()
     {
         var config = new AppConfig

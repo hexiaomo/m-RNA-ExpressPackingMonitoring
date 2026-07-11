@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         订单备注播报插件
 // @namespace    https://github.com/ExpressPackingMonitoring
-// @version      1.9
+// @version      2.0
 // @description  从快递助手批量打印页面提取订单备注和打印后退款状态，发送到监控工位，打包时自动播报或报警。
 // @author       ExpressPackingMonitoring
 // @icon         https://raw.githubusercontent.com/m-RNA/ExpressPackingMonitoring/main/ExpressPackingMonitoring/app.ico
@@ -15,6 +15,7 @@
 // @grant        GM_registerMenuCommand
 // @grant        GM_getValue
 // @grant        GM_setValue
+// @grant        GM_openInTab
 // @noframes
 // @run-at       document-idle
 // ==/UserScript==
@@ -34,7 +35,14 @@
     const PRINTED_REFUND_STABLE_MS = 500;
     const PRINTED_REFUND_FILTER_COOLDOWN_MS = 30000;
     const USER_ACTIVITY_IDLE_MS = 30000;
-    const CHANGELOG = 'v1.9：用户操作页面时不切换筛选，仅在后台、失焦或空闲时自动查询';
+    const REFUND_WORKER_PARAM = 'epm_refund_worker';
+    const REFUND_WORKER_HEARTBEAT_KEY = 'refund_worker_heartbeat';
+    const REFUND_WORKER_OPEN_LOCK_KEY = 'refund_worker_open_lock';
+    const REFUND_WORKER_HEARTBEAT_INTERVAL_MS = 2000;
+    const REFUND_WORKER_STALE_MS = 90000;
+    const REFUND_WORKER_OPEN_COOLDOWN_MS = 120000;
+    const IS_REFUND_WORKER = new URL(location.href).searchParams.get(REFUND_WORKER_PARAM) === '1';
+    const CHANGELOG = 'v2.0：使用独立后台标签页核验打印后退款，不再切换用户正在操作的页面';
     const DEBUG_LOG = false;
 
     let lastUserActivityAt = Date.now();
@@ -55,6 +63,43 @@
 
     function debugLog(...args) {
         if (DEBUG_LOG) console.log(...args);
+    }
+
+    function buildRefundWorkerUrl() {
+        const url = new URL(location.href);
+        url.searchParams.set(REFUND_WORKER_PARAM, '1');
+        return url.href;
+    }
+
+    function writeRefundWorkerHeartbeat() {
+        GM_setValue(REFUND_WORKER_HEARTBEAT_KEY, Date.now());
+    }
+
+    function startRefundWorkerHeartbeat() {
+        writeRefundWorkerHeartbeat();
+        setInterval(writeRefundWorkerHeartbeat, REFUND_WORKER_HEARTBEAT_INTERVAL_MS);
+        document.title = `退款核验工作页 - ${document.title}`;
+    }
+
+    async function ensureRefundWorker(force) {
+        if (IS_REFUND_WORKER) return;
+        if (!force && !document.querySelector('tr.packageItem, select.extendSearchList')) return;
+
+        const now = Date.now();
+        const heartbeat = Number(GM_getValue(REFUND_WORKER_HEARTBEAT_KEY, 0));
+        if (!force && heartbeat > 0 && now - heartbeat < REFUND_WORKER_STALE_MS) return;
+
+        const currentLock = GM_getValue(REFUND_WORKER_OPEN_LOCK_KEY, null);
+        if (!force && currentLock && now - Number(currentLock.time || 0) < REFUND_WORKER_OPEN_COOLDOWN_MS) return;
+
+        const token = `${now}-${Math.random().toString(36).slice(2)}`;
+        GM_setValue(REFUND_WORKER_OPEN_LOCK_KEY, { token, time: now });
+        await delay(100);
+        const ownedLock = GM_getValue(REFUND_WORKER_OPEN_LOCK_KEY, null);
+        if (!ownedLock || ownedLock.token !== token) return;
+
+        GM_openInTab(buildRefundWorkerUrl(), { active: false, insert: true, setParent: false });
+        debugLog('[打包监控] 已在后台打开退款核验工作页');
     }
 
     function getApiUrl() { return `${getBaseUrl(getMonitorAddressText())}/api/orderinfo`; }
@@ -249,25 +294,31 @@
         return false;
     }
 
-    // 注册菜单命令用于修改配置
-    GM_registerMenuCommand('设置上位机地址', () => {
-        const input = prompt('请输入打包监控上位机地址（IP:端口 或 http://IP:端口）：', getMonitorAddressText());
-        if (input) {
-            const address = saveMonitorAddress(input.trim(), DEFAULT_PORT);
-            showNotification(`已设置上位机地址：${formatAddress(address)}`);
-        }
-    });
-    GM_registerMenuCommand('自动探测上位机地址', async () => {
-        showNotification('正在自动探测上位机地址...');
-        const found = await findMonitorAddress(true);
-        showNotification(found ? `已自动填入：${found}` : '未找到上位机，请确认已开启 Web 服务并在同一局域网');
-    });
-    GM_registerMenuCommand('发送测试订单', async () => {
-        await sendTestOrder();
-    });
-    GM_registerMenuCommand('立即推送订单数据', () => {
-        extractAndPush();
-    });
+    // 专用工作页不显示业务菜单，避免用户误在工作页执行普通推送。
+    if (!IS_REFUND_WORKER) {
+        GM_registerMenuCommand('设置上位机地址', () => {
+            const input = prompt('请输入打包监控上位机地址（IP:端口 或 http://IP:端口）：', getMonitorAddressText());
+            if (input) {
+                const address = saveMonitorAddress(input.trim(), DEFAULT_PORT);
+                showNotification(`已设置上位机地址：${formatAddress(address)}`);
+            }
+        });
+        GM_registerMenuCommand('自动探测上位机地址', async () => {
+            showNotification('正在自动探测上位机地址...');
+            const found = await findMonitorAddress(true);
+            showNotification(found ? `已自动填入：${found}` : '未找到上位机，请确认已开启 Web 服务并在同一局域网');
+        });
+        GM_registerMenuCommand('发送测试订单', async () => {
+            await sendTestOrder();
+        });
+        GM_registerMenuCommand('立即推送订单数据', () => {
+            extractAndPush();
+        });
+        GM_registerMenuCommand('重新打开退款核验工作页', () => {
+            GM_setValue(REFUND_WORKER_HEARTBEAT_KEY, 0);
+            ensureRefundWorker(true);
+        });
+    }
 
     // ============ 数据提取 ============
     function isTrueAttribute(element, name) {
@@ -496,7 +547,7 @@
         }
 
         const now = Date.now();
-        if (isUserActivelyUsingPage(now)) {
+        if (!IS_REFUND_WORKER && isUserActivelyUsingPage(now)) {
             throw new Error('检测到用户正在操作快递助手，本次不切换页面，已使用监控端最近缓存');
         }
         if (now - lastPrintedRefundFilterClickAt < PRINTED_REFUND_FILTER_COOLDOWN_MS) {
@@ -532,11 +583,14 @@
 
     let orderLookupPollStarted = false;
     async function pollOrderLookupRequests() {
+        let reconnectDelay = ORDER_LOOKUP_RECONNECT_MS;
         try {
             if (!document.querySelector('tr.packageItem, select.extendSearchList')) {
                 return;
             }
             const response = await requestMonitor('GET', getOrderLookupPendingUrl(), null, 25000);
+            writeRefundWorkerHeartbeat();
+            if (response.status === 200) reconnectDelay = 0;
             const pending = response.status === 200 ? response.body : null;
             if (pending?.pending && pending.requestId) {
                 let orders = [];
@@ -561,11 +615,16 @@
         } catch (e) {
             debugLog('[打包监控] 轮询扫码核验请求失败:', e);
         } finally {
-            setTimeout(pollOrderLookupRequests, ORDER_LOOKUP_RECONNECT_MS);
+            if (reconnectDelay > 0) {
+                setTimeout(pollOrderLookupRequests, reconnectDelay);
+            } else {
+                Promise.resolve().then(pollOrderLookupRequests);
+            }
         }
     }
 
     function startOrderLookupPolling() {
+        if (!IS_REFUND_WORKER) return;
         if (orderLookupPollStarted) return;
         orderLookupPollStarted = true;
         pollOrderLookupRequests();
@@ -685,21 +744,27 @@
         }
     });
 
-    // 延迟启动观察，等页面加载
-    setTimeout(async () => {
-        // 优先监听订单列表容器，fallback 到 body
-        const target = document.querySelector('.dfdd_container') ||
-                       document.querySelector('.packageItem')?.closest('table')?.parentElement ||
-                       document.body;
-        observer.observe(target, { childList: true, subtree: true });
-        debugLog('[打包监控] DOM 监听已启动, 目标:', target.tagName, target.className || '(body)');
-        // 绑定操作按钮监听
-        bindActionButtons();
-        await ensureMonitorAddress(true);
-        // 首次推送
-        extractAndPush();
-        startOrderLookupPolling();
-    }, 3000);
+    if (IS_REFUND_WORKER) {
+        startRefundWorkerHeartbeat();
+        setTimeout(async () => {
+            await ensureMonitorAddress(true);
+            startOrderLookupPolling();
+        }, 3000);
+    } else {
+        // 普通页面只负责订单推送，不再领取退款请求或切换筛选。
+        setTimeout(async () => {
+            const target = document.querySelector('.dfdd_container') ||
+                           document.querySelector('.packageItem')?.closest('table')?.parentElement ||
+                           document.body;
+            observer.observe(target, { childList: true, subtree: true });
+            debugLog('[打包监控] DOM 监听已启动, 目标:', target.tagName, target.className || '(body)');
+            bindActionButtons();
+            await ensureMonitorAddress(true);
+            extractAndPush();
+            ensureRefundWorker(false);
+            setInterval(() => ensureRefundWorker(false), 5000);
+        }, 3000);
+    }
 
     debugLog('[打包监控] 油猴脚本已加载', CHANGELOG);
 })();

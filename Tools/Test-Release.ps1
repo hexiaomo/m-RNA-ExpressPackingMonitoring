@@ -17,6 +17,7 @@ $requiredCoreTests = @(
     "ConfigurationAndScannerTests.ShouldAlertPrintedRefund_AlertsEnabledShippingAndReturnScans",
     "ConfigurationAndScannerTests.ShouldAlertPrintedRefund_UsesRefundStatus",
     "ConfigurationAndScannerTests.GetPrintedRefundLookupDelay_RequestsImmediatelyThenThrottlesForFiveSeconds",
+    "ConfigurationAndScannerTests.RefundWorkerUserscript_IsolatesLookupFromUserPage",
     "ConfigurationAndScannerTests.AlertService_CriticalAlertBlocksNormalAlertUntilDisplayEnds",
     "ConfigurationAndScannerTests.AlertService_ForwardsIndustrialAlarmOnceAndRefundSpeechThreeTimes",
     "VideoDatabaseTests.GetRecentCompletedVideos_ReturnsLatestTwentyValidRecordsForDate",

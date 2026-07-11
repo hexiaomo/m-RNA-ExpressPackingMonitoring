@@ -20,6 +20,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\ExpressPackingMonitoring\ExpressPackingMonitoring.csproj" />
+    <None Include="..\Scripts\快递助手订单推送.user.js" Link="Scripts\快递助手订单推送.user.js" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>
