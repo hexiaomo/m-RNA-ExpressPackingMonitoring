@@ -5,6 +5,7 @@ using ExpressPackingMonitoring.Config;
 using System;
 using System.Threading.Tasks;
 using System.Windows;
+using System.Windows.Interop;
 
 namespace ExpressPackingMonitoring
 {
@@ -20,12 +21,14 @@ namespace ExpressPackingMonitoring
             base.OnStartup(e);
             RegisterRuntimeExceptionLogging();
             RuntimeLog.Info("App", "Application startup");
+            RuntimeLog.LogSessionStart(e.Args);
             RuntimeLog.LogBuildInfo();
             ShutdownMode = ShutdownMode.OnExplicitShutdown;
 
             if (AudioProbe.TryHandleCommandLine(e.Args, out int exitCode))
             {
                 RuntimeLog.Info("App", $"AudioProbe command handled, exitCode={exitCode}");
+                RuntimeLog.RecordShutdownRequest("AudioProbeCompleted", $"exitCode={exitCode}");
                 Shutdown(exitCode);
                 return;
             }
@@ -52,13 +55,14 @@ namespace ExpressPackingMonitoring
                 var selector = new WorkstationSelectionWindow();
                 if (selector.ShowDialog() != true || string.IsNullOrWhiteSpace(selector.SelectedRole))
                 {
+                    RuntimeLog.RecordShutdownRequest("WorkstationSelectionCancelled");
                     Shutdown(0);
                     return;
                 }
 
                 if (!TrySaveStartupRole(config, selector.SelectedRole))
                     return;
-                if (WorkstationNetwork.TryRestartApplication())
+                if (WorkstationNetwork.TryRestartApplication("startup-workstation-selection"))
                     return;
 
                 startupRole = config.WorkstationRole;
@@ -66,6 +70,7 @@ namespace ExpressPackingMonitoring
 
             if (!WorkstationRoles.IsKnown(startupRole))
             {
+                RuntimeLog.RecordShutdownRequest("InvalidWorkstationRole", startupRole);
                 Shutdown(0);
                 return;
             }
@@ -76,6 +81,11 @@ namespace ExpressPackingMonitoring
             Window window = string.Equals(startupRole, WorkstationRoles.PrintStation, StringComparison.OrdinalIgnoreCase)
                 ? new PrintWorkstationWindow(config)
                 : new MainWindow();
+            window.SourceInitialized += (_, _) =>
+            {
+                if (PresentationSource.FromVisual(window) is HwndSource source)
+                    source.AddHook(ShutdownWindowProc);
+            };
             MainWindow = window;
             _instanceCoordinator?.StartActivationListener(window);
             window.Show();
@@ -98,15 +108,29 @@ namespace ExpressPackingMonitoring
                 "启动失败",
                 MessageBoxButton.OK,
                 MessageBoxImage.Error);
+            RuntimeLog.RecordShutdownRequest("StartupConfigSaveFailed", error);
             Shutdown(1);
             return false;
         }
 
         protected override void OnExit(ExitEventArgs e)
         {
+            (string source, string detail) = RuntimeLog.GetShutdownRequest();
+            if (string.Equals(source, "not-recorded", StringComparison.Ordinal))
+            {
+                RuntimeLog.RecordShutdownRequest("ApplicationExitWithoutRecordedClose", $"shutdownMode={ShutdownMode}");
+                (source, detail) = RuntimeLog.GetShutdownRequest();
+            }
+            RuntimeLog.Info("App", $"Session exit session={RuntimeLog.CurrentSessionId}, pid={Environment.ProcessId}, exitCode={e.ApplicationExitCode}, source={source}, detail={detail}");
             _instanceCoordinator?.Dispose();
             _instanceCoordinator = null;
             base.OnExit(e);
+        }
+
+        protected override void OnSessionEnding(SessionEndingCancelEventArgs e)
+        {
+            RuntimeLog.RecordShutdownRequest("WindowsSessionEnding", e.ReasonSessionEnding.ToString());
+            base.OnSessionEnding(e);
         }
 
         private bool PrepareWorkstationInstance(ref string startupRole, out WorkstationInstanceCoordinator? coordinator)
@@ -131,12 +155,20 @@ namespace ExpressPackingMonitoring
                 }
 
                 WorkstationInstanceCoordinator.RequestActivate(startupRole);
+                RuntimeLog.RecordShutdownRequest("TemporaryRoleUnavailable", startupRole);
                 Shutdown(0);
                 return false;
             }
 
             if (dialog.Choice == DuplicateInstanceChoice.ActivateExisting)
+            {
                 WorkstationInstanceCoordinator.RequestActivate(startupRole);
+                RuntimeLog.RecordShutdownRequest("DuplicateInstanceActivated", startupRole);
+            }
+            else
+            {
+                RuntimeLog.RecordShutdownRequest("DuplicateInstanceCancelled", startupRole);
+            }
 
             Shutdown(0);
             return false;
@@ -180,15 +212,31 @@ namespace ExpressPackingMonitoring
             return "";
         }
 
+        private static IntPtr ShutdownWindowProc(IntPtr hwnd, int message, IntPtr wParam, IntPtr lParam, ref bool handled)
+        {
+            string? shutdownSource = RuntimeLog.ClassifyShutdownWindowMessage(message, wParam);
+            if (shutdownSource != null)
+            {
+                RuntimeLog.RecordShutdownRequest(
+                    shutdownSource,
+                    $"hwnd=0x{hwnd.ToInt64():X}, message=0x{message:X4}, wParam=0x{wParam.ToInt64():X}, lParam=0x{lParam.ToInt64():X}");
+            }
+
+            return IntPtr.Zero;
+        }
+
         private static void RegisterRuntimeExceptionLogging()
         {
             Current.DispatcherUnhandledException += (_, e) =>
             {
+                RuntimeLog.RecordShutdownRequest("DispatcherUnhandledException", e.Exception.GetType().FullName ?? e.Exception.GetType().Name);
                 RuntimeLog.Error("Unhandled", "DispatcherUnhandledException", e.Exception);
             };
 
             AppDomain.CurrentDomain.UnhandledException += (_, e) =>
             {
+                if (e.IsTerminating)
+                    RuntimeLog.RecordShutdownRequest("AppDomainUnhandledException", e.ExceptionObject?.GetType().FullName ?? "unknown");
                 RuntimeLog.Error("Unhandled", $"AppDomain unhandled exception, terminating={e.IsTerminating}", e.ExceptionObject as Exception);
             };
 

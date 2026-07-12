@@ -362,7 +362,7 @@ public static class WorkstationNetwork
         TryOpenUrl(url, out _);
     }
 
-    public static bool TryRestartApplication()
+    public static bool TryRestartApplication(string reason = "unspecified")
     {
         try
         {
@@ -381,11 +381,16 @@ public static class WorkstationNetwork
             if (process == null)
                 return false;
 
+            int newProcessId = process.Id;
+            process.Dispose();
+            RuntimeLog.RecordShutdownRequest("ApplicationRestart", reason);
+            RuntimeLog.Info("Restart", $"Started replacement process currentPid={Environment.ProcessId}, newPid={newProcessId}, reason={reason}");
             try { Application.Current.Shutdown(); } catch { }
             return true;
         }
-        catch
+        catch (Exception ex)
         {
+            RuntimeLog.Error("Restart", $"Failed to restart application reason={reason}", ex);
             return false;
         }
     }
@@ -397,7 +402,7 @@ public static class WorkstationNetwork
             "切换工位",
             MessageBoxButton.YesNo,
             MessageBoxImage.Question);
-        if (result == MessageBoxResult.Yes && !TryRestartApplication())
+        if (result == MessageBoxResult.Yes && !TryRestartApplication("workstation-role-change"))
         {
             MessageBox.Show(owner, "自动重启失败，请手动关闭后重新打开程序。", "切换工位", MessageBoxButton.OK, MessageBoxImage.Information);
         }

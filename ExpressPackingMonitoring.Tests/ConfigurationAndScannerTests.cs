@@ -1,6 +1,7 @@
 using ExpressPackingMonitoring.Config;
 using ExpressPackingMonitoring.Audio;
 using ExpressPackingMonitoring.Input;
+using ExpressPackingMonitoring.Logging;
 using ExpressPackingMonitoring.Services;
 using ExpressPackingMonitoring.ViewModels;
 using Xunit;
@@ -9,6 +10,33 @@ namespace ExpressPackingMonitoring.Tests;
 
 public sealed class ConfigurationAndScannerTests
 {
+    [Theory]
+    [InlineData(0x0112, 0xF060, "WindowSystemCommandClose")]
+    [InlineData(0x0010, 0, "WindowCloseMessage")]
+    [InlineData(0x0011, 0, "WindowsQueryEndSession")]
+    [InlineData(0x0016, 1, "WindowsEndSession")]
+    public void ClassifyShutdownWindowMessage_IdentifiesCloseSources(int message, long wParam, string expected)
+    {
+        Assert.Equal(expected, RuntimeLog.ClassifyShutdownWindowMessage(message, new IntPtr(wParam)));
+    }
+
+    [Fact]
+    public void ClassifyShutdownWindowMessage_IgnoresCancelledEndSession()
+    {
+        Assert.Null(RuntimeLog.ClassifyShutdownWindowMessage(0x0016, IntPtr.Zero));
+    }
+
+    [Fact]
+    public void FormatStartupArguments_LogsRolesAndRedactsUnknownValues()
+    {
+        string result = RuntimeLog.FormatStartupArguments(new[]
+        {
+            "--role", "camera", "private-value", "--custom=secret"
+        });
+
+        Assert.Equal("--role CameraMonitor <redacted> --custom", result);
+    }
+
     [Fact]
     public void RefundWorkerUserscript_IsolatesLookupFromUserPage()
     {

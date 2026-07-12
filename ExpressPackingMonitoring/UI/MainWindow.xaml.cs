@@ -428,7 +428,15 @@ namespace ExpressPackingMonitoring.UI
             _shutdownInProgress = true;
             _capsCheckTimer.Stop();
             RestoreCapsLockState();
-            RuntimeLog.Info("Shutdown", "Main window closing requested");
+            (string shutdownSource, string shutdownDetail) = RuntimeLog.GetShutdownRequest();
+            if (string.Equals(shutdownSource, "not-recorded", StringComparison.Ordinal))
+            {
+                RuntimeLog.RecordShutdownRequest(
+                    "WpfWindowClosing",
+                    $"isActive={IsActive}, windowState={WindowState}, isVisible={IsVisible}");
+                (shutdownSource, shutdownDetail) = RuntimeLog.GetShutdownRequest();
+            }
+            RuntimeLog.Info("Shutdown", $"Main window closing requested session={RuntimeLog.CurrentSessionId}, source={shutdownSource}, detail={shutdownDetail}");
 
             bool saved = true;
             if (vm != null)
@@ -497,6 +505,8 @@ namespace ExpressPackingMonitoring.UI
             {
                 // 录像收尾已经完成；解除 Closing 处理器后显式退出，避免后台资源让进程残留。
                 Closing -= Window_Closing;
+                (string source, string detail) = RuntimeLog.GetShutdownRequest();
+                RuntimeLog.Info("Shutdown", $"Process exit requested session={RuntimeLog.CurrentSessionId}, pid={Environment.ProcessId}, source={source}, detail={detail}");
                 try { Application.Current?.Shutdown(0); } catch { }
                 Environment.Exit(0);
             }
