@@ -16,6 +16,7 @@ public sealed class ConfigurationAndScannerTests
         string script = File.ReadAllText(scriptPath);
 
         Assert.Contains("// @grant        GM_openInTab", script);
+        Assert.Contains("// @grant        GM_getTabs", script);
         Assert.Contains("const IS_REFUND_WORKER", script);
         Assert.Contains("GM_openInTab(buildRefundWorkerUrl(), { active: false, setParent: false })", script);
         Assert.Contains("【退款核验专用】请勿操作", script);
@@ -24,6 +25,12 @@ public sealed class ConfigurationAndScannerTests
         Assert.Contains("claimRefundWorkerLease()", script);
         Assert.Contains("ownedHeartbeat.token !== REFUND_WORKER_TOKEN", script);
         Assert.Contains("closeDuplicateRefundWorker()", script);
+        Assert.Contains("hasOpenRefundWorkerTab()", script);
+        Assert.Contains("saveRefundWorkerTabIdentity(true)", script);
+        Assert.Contains("if (!force && monitorReachable !== true) return", script);
+        Assert.Contains("maintainRefundWorker(monitorReachable)", script);
+        Assert.Contains("REFUND_WORKER_HEARTBEAT_INTERVAL_MS = 30000", script);
+        Assert.Contains("REFUND_WORKER_RECHECK_INTERVAL_MS = 30000", script);
         Assert.Contains("const REFUND_WORKER_STALE_MS = 10 * 60 * 1000", script);
         Assert.Contains("if (!event.persisted) releaseRefundWorkerLease()", script);
         Assert.Contains("if (!IS_REFUND_WORKER) return;", script);

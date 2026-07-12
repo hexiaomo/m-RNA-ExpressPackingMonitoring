@@ -38,6 +38,44 @@ function createLeaseWorker(store, token, closed) {
   return context;
 }
 
+function createWorkerManager({ reachable, savedTabs = {} }) {
+  const store = new Map();
+  const opened = [];
+  const currentTab = {};
+  const context = {
+    REFUND_WORKER_HEARTBEAT_KEY: 'heartbeat',
+    REFUND_WORKER_OPEN_LOCK_KEY: 'open-lock',
+    REFUND_WORKER_TOKEN: 'ordinary-page',
+    REFUND_WORKER_STALE_MS: 10 * 60 * 1000,
+    REFUND_WORKER_OPEN_COOLDOWN_MS: 10 * 60 * 1000,
+    IS_REFUND_WORKER: false,
+    GM_getValue: (key, fallback) => store.has(key) ? store.get(key) : fallback,
+    GM_setValue: (key, value) => store.set(key, value),
+    GM_getTab: callback => callback(currentTab),
+    GM_saveTab: (tab, callback) => callback?.(),
+    GM_getTabs: callback => callback(savedTabs),
+    GM_openInTab: url => opened.push(url),
+    getMonitorAddress: () => ({ host: '192.168.2.11', port: 5280 }),
+    canConnectMonitor: async () => reachable,
+    buildRefundWorkerUrl: () => 'https://p4.kuaidizs.cn/?epm_refund_worker=1',
+    delay: () => Promise.resolve(),
+    document: { querySelector: () => ({}) },
+    window: { close() {}, addEventListener() {} },
+    location: { replace() {} },
+    setTimeout,
+    Math,
+    Date,
+    Object,
+    Promise
+  };
+  vm.createContext(context);
+  vm.runInContext(
+    between('    function getRefundWorkerHeartbeat()', '    function getApiUrl()') +
+      ';globalThis.ensureWorker=ensureRefundWorker;globalThis.maintainWorker=maintainRefundWorker;',
+    context);
+  return { context, opened };
+}
+
 test('concurrent refund workers keep exactly one lease owner', async () => {
   const store = new Map();
   const closed = [];
@@ -56,6 +94,21 @@ test('fresh lease is retained and stale lease can recover', async () => {
   store.set('heartbeat', { token: 'stale-owner', time: Date.now() - 10 * 60 * 1000 - 1 });
   assert.equal(await createLeaseWorker(store, 'replacement', closed).claimLease(), true);
   assert.equal(store.get('heartbeat').token, 'replacement');
+});
+
+test('offline monitor never opens a refund worker', async () => {
+  const { context, opened } = createWorkerManager({ reachable: false });
+  await context.maintainWorker();
+  assert.equal(opened.length, 0);
+});
+
+test('saved refund worker tab prevents duplicate even with stale heartbeat', async () => {
+  const { context, opened } = createWorkerManager({
+    reachable: true,
+    savedTabs: { existing: { epmRefundWorker: true } }
+  });
+  await context.ensureWorker(false, true);
+  assert.equal(opened.length, 0);
 });
 
 function createDiscoveryContext(initialStore, reachableHosts) {

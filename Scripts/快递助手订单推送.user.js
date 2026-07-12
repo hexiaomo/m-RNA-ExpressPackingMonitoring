@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         订单备注播报插件
 // @namespace    https://github.com/ExpressPackingMonitoring
-// @version      2.2
+// @version      2.4
 // @description  从快递助手批量打印页面提取订单备注和打印后退款状态，发送到监控工位，打包时自动播报或报警。
 // @author       ExpressPackingMonitoring
 // @icon         https://raw.githubusercontent.com/m-RNA/ExpressPackingMonitoring/main/ExpressPackingMonitoring/app.ico
@@ -16,6 +16,9 @@
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @grant        GM_openInTab
+// @grant        GM_getTab
+// @grant        GM_saveTab
+// @grant        GM_getTabs
 // @noframes
 // @run-at       document-idle
 // ==/UserScript==
@@ -38,13 +41,14 @@
     const REFUND_WORKER_PARAM = 'epm_refund_worker';
     const REFUND_WORKER_HEARTBEAT_KEY = 'refund_worker_heartbeat';
     const REFUND_WORKER_OPEN_LOCK_KEY = 'refund_worker_open_lock';
-    const REFUND_WORKER_HEARTBEAT_INTERVAL_MS = 2000;
+    const REFUND_WORKER_HEARTBEAT_INTERVAL_MS = 30000;
+    const REFUND_WORKER_RECHECK_INTERVAL_MS = 30000;
     // Chrome 可能暂停长时间处于后台的标签页，不应因短时无心跳反复新建工作页。
     const REFUND_WORKER_STALE_MS = 10 * 60 * 1000;
     const REFUND_WORKER_OPEN_COOLDOWN_MS = 10 * 60 * 1000;
     const IS_REFUND_WORKER = new URL(location.href).searchParams.get(REFUND_WORKER_PARAM) === '1';
     const REFUND_WORKER_TOKEN = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    const CHANGELOG = 'v2.2：防止退款核验页重复打开，并避免多监控端环境自动串台';
+    const CHANGELOG = 'v2.4：退款核验页心跳调整为 30 秒，便于长时间挂机验证';
     const DEBUG_LOG = false;
 
     let lastUserActivityAt = Date.now();
@@ -91,6 +95,24 @@
         }
     }
 
+    function saveRefundWorkerTabIdentity(isWorker) {
+        return new Promise(resolve => {
+            GM_getTab(tab => {
+                tab.epmRefundWorker = isWorker;
+                tab.epmRefundWorkerToken = isWorker ? REFUND_WORKER_TOKEN : '';
+                GM_saveTab(tab, resolve);
+            });
+        });
+    }
+
+    function hasOpenRefundWorkerTab() {
+        return new Promise(resolve => {
+            GM_getTabs(tabs => {
+                resolve(Object.values(tabs || {}).some(tab => tab?.epmRefundWorker === true));
+            });
+        });
+    }
+
     function closeDuplicateRefundWorker() {
         document.title = '【重复的退款核验页】正在关闭';
         window.close();
@@ -117,6 +139,7 @@
 
     async function startRefundWorkerHeartbeat() {
         if (!await claimRefundWorkerLease()) return false;
+        await saveRefundWorkerTabIdentity(true);
 
         window.addEventListener('pagehide', event => {
             if (!event.persisted) releaseRefundWorkerLease();
@@ -159,13 +182,15 @@
         return true;
     }
 
-    async function ensureRefundWorker(force) {
+    async function ensureRefundWorker(force, monitorReachable) {
         if (IS_REFUND_WORKER) return;
         if (!force && !document.querySelector('tr.packageItem, select.extendSearchList')) return;
+        if (!force && monitorReachable !== true) return;
 
         const now = Date.now();
         const heartbeat = getRefundWorkerHeartbeat();
         if (!force && heartbeat.time > 0 && now - heartbeat.time < REFUND_WORKER_STALE_MS) return;
+        if (!force && await hasOpenRefundWorkerTab()) return;
 
         const currentLock = GM_getValue(REFUND_WORKER_OPEN_LOCK_KEY, null);
         if (!force && currentLock && now - Number(currentLock.time || 0) < REFUND_WORKER_OPEN_COOLDOWN_MS) return;
@@ -179,6 +204,25 @@
         // 默认追加到标签栏末尾，不与用户正在操作的打印页并排插入。
         GM_openInTab(buildRefundWorkerUrl(), { active: false, setParent: false });
         debugLog('[打包监控] 已在后台打开退款核验工作页');
+    }
+
+    let refundWorkerMaintenancePromise = null;
+    function maintainRefundWorker(monitorReachable) {
+        if (IS_REFUND_WORKER) return Promise.resolve();
+        if (refundWorkerMaintenancePromise) return refundWorkerMaintenancePromise;
+
+        refundWorkerMaintenancePromise = (async () => {
+            if (monitorReachable === undefined) {
+                const heartbeat = getRefundWorkerHeartbeat();
+                if (heartbeat.time > 0 && Date.now() - heartbeat.time < REFUND_WORKER_STALE_MS) return;
+                if (await hasOpenRefundWorkerTab()) return;
+
+                const address = getMonitorAddress();
+                monitorReachable = await canConnectMonitor(address.host, address.port);
+            }
+            await ensureRefundWorker(false, monitorReachable);
+        })().finally(() => { refundWorkerMaintenancePromise = null; });
+        return refundWorkerMaintenancePromise;
     }
 
     function getApiUrl() { return `${getBaseUrl(getMonitorAddressText())}/api/orderinfo`; }
@@ -404,7 +448,7 @@
         });
         GM_registerMenuCommand('重新打开退款核验工作页', () => {
             GM_setValue(REFUND_WORKER_HEARTBEAT_KEY, 0);
-            ensureRefundWorker(true);
+            ensureRefundWorker(true, true);
         });
     }
 
@@ -905,16 +949,17 @@
     } else {
         // 普通页面只负责订单推送，不再领取退款请求或切换筛选。
         setTimeout(async () => {
+            await saveRefundWorkerTabIdentity(false);
             const target = document.querySelector('.dfdd_container') ||
                            document.querySelector('.packageItem')?.closest('table')?.parentElement ||
                            document.body;
             observer.observe(target, { childList: true, subtree: true });
             debugLog('[打包监控] DOM 监听已启动, 目标:', target.tagName, target.className || '(body)');
             bindActionButtons();
-            await ensureMonitorAddress(true);
+            const monitorReachable = await ensureMonitorAddress(true);
             extractAndPush();
-            ensureRefundWorker(false);
-            setInterval(() => ensureRefundWorker(false), 5000);
+            maintainRefundWorker(monitorReachable);
+            setInterval(() => maintainRefundWorker(), REFUND_WORKER_RECHECK_INTERVAL_MS);
         }, 3000);
     }
 
